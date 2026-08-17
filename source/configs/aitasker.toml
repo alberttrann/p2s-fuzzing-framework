@@ -1,0 +1,29 @@
+[target]
+name = "aitasker"
+base_url = "http://localhost:3000/api"
+openapi_spec = "aitasker_openapi.json"
+state_adapter = "postgres"
+executor_adapter = "ocli"
+golden_out = "aitasker_golden_dataset.jsonl"
+silver_out = "aitasker_silver_dataset.jsonl"
+checkpoint_file = "aitasker_processed_flows.txt"
+
+[postgres]
+active_db = "aitasker_active"
+template_db = "aitasker_snap"
+admin_url = "postgresql://postgres:postgres@localhost:5434/postgres"
+seed_command = "npx prisma db push --accept-data-loss && npx prisma db execute --file=prisma/migrations/010_seed.sql"
+
+[llm]
+backend = "openai_compat"
+base_url = "http://localhost:8081/v1"
+model = "qwen35-9b-p2s"
+api_key = "no-key"
+max_attempts = 6
+
+[proxy]
+listen_port = 8091
+target_host = "http://localhost:3000"
+flow_strategy = "endpoint"
+reset_endpoint = "/auth/register"
+output_file = "aitasker_primitive_traces.jsonl"

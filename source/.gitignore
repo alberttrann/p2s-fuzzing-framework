@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# P2S runtime artifacts
+primitive_traces.jsonl
+compiled_traces.jsonl
+ocli_catalog.json
+processed_flows.txt
+*_golden_dataset*.jsonl
+*_silver_dataset*.jsonl
+final_training_dataset.jsonl
+*_execution_log.txt
+*_run_metadata.json
+p2s_run_metadata.json
+
+# IDE/OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

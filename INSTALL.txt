@@ -1,0 +1,19 @@
+P2S Framework SDK 1.1.0
+
+Install the prebuilt wheel:
+  python -m pip install dist/p2s_framework-1.1.0-py3-none-any.whl
+
+Or install/edit the source:
+  python -m pip install ./source
+  python -m pip install -e "./source[dev]"
+
+Python:
+  from p2s import P2S
+  sdk = P2S.from_toml("configs/seal_hackathon.toml")
+
+CLI:
+  p2s --help
+  python -m p2s --help
+
+Research reproduction:
+  source/docs/REPRODUCIBILITY.md

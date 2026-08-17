@@ -1,0 +1,29 @@
+[target]
+name = "seal_hackathon"
+base_url = "http://localhost:8080/api"
+openapi_spec = "seal_openapi.json"
+state_adapter = "postgres"
+executor_adapter = "ocli"
+golden_out = "llamacpp_golden_dataset.jsonl"
+silver_out = "llamacpp_silver_dataset.jsonl"
+checkpoint_file = "processed_flows.txt"
+
+[postgres]
+active_db = "seal_hackathon"
+template_db = "seal_hackathon_snap"
+admin_url = "postgresql://postgres:postgres@localhost:5432/postgres"
+seed_command = "psql -U postgres -d seal_hackathon -f seal_hackathon_full.sql"
+setup_script = "hooks/seal_setup_hook.py"
+
+[llm]
+backend = "openai_compat"
+base_url = "http://localhost:8081/v1"
+model = "qwen35-9b-p2s"
+api_key = "no-key"
+max_attempts = 6
+
+[proxy]
+listen_port = 8090
+target_host = "http://localhost:8080"
+flow_strategy = "header"
+output_file = "primitive_traces.jsonl"
