@@ -7,6 +7,8 @@ This document consolidates the experiment procedures that were originally spread
 
 P2S was developed iteratively. AITasker training-data generation, SEAL Track A, and the eleven RESTgym Track B services each exposed target-specific requirements: different authentication, context paths, database reset mechanisms, proxy flow-boundary rules, and execution budgets. **P2S Framework v1.1.0 is the normalized reusable layer extracted from those experiments.** Target-specific setup remains configuration, hooks, or research-harness code rather than being baked into the core engine.
 
+The repository root also includes `p2s_colab_train.ipynb` as a **training-reproduction example**. It is intentionally outside the `p2s/` package: the SDK produces `final_training_dataset.jsonl`; the notebook is one downstream consumer that reproduces the paper's Qwen3.5-9B specialization on Colab/A100. Installing the wheel does not install or require the notebook's Unsloth/TRL stack.
+
 > **Authorized testing only.** All commands below assume an isolated local research environment, disposable state, and systems that you own or have explicit permission to test.
 
 ---
@@ -579,39 +581,284 @@ If your rerun differs, report the rerun as a new repetition rather than editing 
 
 ---
 
-## 16. Run the Fine-Tuning Notebook
+## 16. Reproduce Fine-Tuning with the Root Colab Notebook
 
-The AITasker research artifact should publish the actual notebook used for training. Keep it outside `p2s-framework`; it is an experimental training artifact rather than runtime SDK code.
+The public P2S repository includes a **root-level Google Colab notebook** (`p2s_colab_train.ipynb`) to reproduce the model-training stage from the dataset emitted by the framework.
+
+> **Scope boundary:** this notebook is **not part of the official P2S SDK/runtime**. `pip install p2s-framework` gives you the reusable capture/compile/fuzz/data-generation/dataset tooling. The notebook is a separate research-reproduction convenience that consumes the framework's final JSONL output. It is intentionally not imported by `p2s`, not required by the CLI, and does not make Unsloth/TRL runtime dependencies of the SDK.
+
+The clean interface between the two layers is:
+
+```text
+P2S framework
+    │
+    ├─ primitive_traces.jsonl
+    ├─ compiled_traces.jsonl
+    ├─ golden_dataset.jsonl
+    ├─ silver_dataset.jsonl
+    │
+    └─ p2s prepare-dataset
+           │
+           ▼
+final_training_dataset.jsonl
+           │
+           │  only required training-data input
+           ▼
+root p2s_colab_train.ipynb
+           │
+           ├─ LoRA adapter
+           ├─ merged 16-bit checkpoint
+           └─ merged 4-bit checkpoint
+                    │
+                    └─ separate llama.cpp conversion -> F16 / Q8_0 GGUF
+```
+
+### 16.1 Prepare the Notebook Input
+
+First generate the final training corpus with the framework as described in the previous section. For the historical run, the retained final corpus contains **2,266 records**.
+
+The notebook expects this exact filename in its working directory:
+
+```text
+final_training_dataset.jsonl
+```
+
+In Colab, the simplest paper-parity path is to upload/copy it to:
+
+```text
+/content/final_training_dataset.jsonl
+```
+
+The notebook deliberately checks for the file at startup and fails early if it is missing, rather than silently training on another dataset.
+
+### 16.2 Select the Colab Runtime
+
+For the reported run, use:
+
+```text
+Google Colab
+GPU: NVIDIA A100 80 GB
+```
+
+An A100 is an **experiment-parity recommendation**, not a requirement of the P2S framework itself. The SDK can generate the JSONL independently of the hardware used later for model training.
+
+### 16.3 Install Notebook-Only Dependencies
+
+Run the dependency cell near the top of the notebook:
+
+```python
+!pip install unsloth trl datasets
+```
+
+These are training-notebook dependencies only. They are intentionally not required for normal `p2s-framework` installation.
+
+### 16.4 Review the Notebook Configuration
+
+The notebook's important defaults are:
+
+```text
+Input file               final_training_dataset.jsonl
+Base model               unsloth/Qwen3.5-9B
+Model loading            4-bit
+Maximum sequence length  24,576
+LoRA rank                32
+LoRA alpha               64
+LoRA dropout             0.05
+Vision layers            excluded
+Language layers          trained
+Attention modules        trained
+MLP modules              trained
+Target modules           q/k/v/o + gate/up/down + lm_head + embed_tokens
+Gradient checkpointing   Unsloth
+Random seed              3407
+Output root              /content/p2s-outputs
+Checkpoint directory     /content/p2s-outputs/qwen35-9b-checkpoints
+```
+
+Hugging Face upload is optional and controlled independently:
+
+```python
+PUSH_TO_HUB = False
+HF_TOKEN = os.environ.get("HF_TOKEN", "your_hf_token_here")
+HF_USER = "your-username"
+```
+
+Set `PUSH_TO_HUB = True` only when you intentionally want the notebook to upload the resulting artifacts.
+
+### 16.5 Run the Dataset Audit Before Training
+
+The notebook loads the JSONL with `datasets.load_dataset`, converts each `messages` conversation through the Qwen chat template, and scans the entire corpus before the trainer starts.
+
+It prints:
+
+```text
+Train Samples
+P50 token length
+P90 token length
+P99 token length
+Maximum token length
+number of samples exceeding 24,576 tokens
+```
+
+For the retained paper run, the measured pre-tokenization distribution was:
+
+```text
+P50    4,079
+P90   10,679
+P99   16,757
+max   17,965
+```
+
+Therefore no retained training record exceeded the configured 24,576-token limit.
+
+If a future regenerated corpus does exceed the limit, do **not** hide the warning. Record the new distribution and describe the truncation/configuration decision as part of that new experimental repetition.
+
+### 16.6 Response-Only Training
+
+The notebook constructs `SFTTrainer`, then applies:
+
+```python
+trainer = train_on_responses_only(
+    trainer,
+    instruction_part="<|im_start|>user\n",
+    response_part="<|im_start|>assistant\n",
+)
+```
+
+This masks system/user prompt and state-history tokens with `-100`, so supervised loss is applied only to the assistant response.
+
+The notebook immediately verifies this behavior on a real dataloader batch and prints the masked-vs-response token ratio. This is a useful reproducibility guard: a broken chat boundary could otherwise silently produce either no trainable response tokens or loss on the entire prompt/history.
+
+### 16.7 Trainer Configuration
 
 The retained training configuration is:
 
 ```text
-Base model              Qwen3.5-9B
-Framework               Unsloth FastVisionModel
-Input                    final_training_dataset.jsonl (2,266 samples)
-Quantization during SFT NF4 / bfloat16 compute
-LoRA rank                32
-LoRA alpha               64
-LoRA dropout             0.05
-Max sequence length      24,576
-Batch size               1
-Gradient accumulation    4
-Epochs                    6
-Peak LR                  2e-4
-Response-only masking    enabled
-Vision layers            excluded
+Per-device batch size      1
+Gradient accumulation      4
+Effective batch size       4
+Warmup steps               50
+Epochs                     6
+Learning rate              2e-4
+Precision                  bfloat16
+FP16                       disabled
+Optimizer                  AdamW 8-bit
+Weight decay               0.01
+Scheduler                   cosine_with_restarts
+LR cycles                  6
+Maximum gradient norm      1.0
+NEFTune noise alpha        5.0
+Packing                    disabled
+Checkpoint every           100 steps
+Retained checkpoints       3
 ```
 
-Run the notebook on an A100-class environment, pointing its dataset path at `final_training_dataset.jsonl`. Retain the notebook output logs and exported artifacts.
+The notebook exposes:
 
-Expected release roles:
+```python
+RESUME_FROM_CHECKPOINT = False
+```
+
+Set it to `True` when resuming from a retained checkpoint directory rather than starting a new run.
+
+### 16.8 Pre-Training GPU Health Probe
+
+Before committing to the full multi-hour run, the notebook executes a synthetic 512-token forward/backward pass under bfloat16 autocast and prints the loss and timing.
+
+This verifies, before `trainer.train()`, that:
+
+- the model is actually on the GPU;
+- the forward pass produces a finite loss;
+- gradients flow through the LoRA-adapted model; and
+- the dtype/runtime configuration is usable.
+
+This is especially important for expensive A100 runs because it catches environment and masking problems before hours of compute are spent.
+
+### 16.9 Execute the Full Training Run
+
+Run the notebook cells top-to-bottom and then execute:
+
+```python
+trainer_stats = trainer.train(resume_from_checkpoint=RESUME_FROM_CHECKPOINT)
+```
+
+For the retained run, the paper records:
 
 ```text
-LoRA              -> minhhungg/qwen35-9b-p2s-lora
-Merged 4-bit      -> minhhungg/qwen35-9b-p2s-merged-4bit
-Merged 16-bit     -> minhhungg/qwen35-9b-p2s-merged-16bit
-GGUF F16 / Q8_0   -> minhhungg/p2s_gguf
+Optimization steps        3,402
+Trainable parameters      58,195,968
+Total parameters          9,468,009,712
+Fraction adapted          0.61%
+Final reported loss       0.1418
+Peak reserved GPU memory  34.69 GB
+Runtime                    about 8.3 hours
 ```
+
+A new run does not need to reproduce every stochastic number bit-for-bit. Preserve its logs and report it as a new repetition if it differs.
+
+### 16.10 Notebook Outputs
+
+By default the notebook writes to:
+
+```text
+/content/p2s-outputs/
+├── qwen35-9b-p2s-lora/
+├── qwen35-9b-p2s-merged-16bit/
+├── qwen35-9b-p2s-merged-4bit/
+└── qwen35-9b-checkpoints/
+```
+
+The notebook verifies the saved directories and reports file counts/sizes at the end.
+
+Expected public artifact roles are:
+
+```text
+LoRA adapter       -> minhhungg/qwen35-9b-p2s-lora
+Merged 4-bit       -> minhhungg/qwen35-9b-p2s-merged-4bit
+Merged 16-bit      -> minhhungg/qwen35-9b-p2s-merged-16bit
+```
+
+### 16.11 GGUF Is a Separate Post-Training Step
+
+The Colab notebook does **not** define the official P2S runtime and does not need to produce the evaluation GGUF itself. For the reported evaluation, the merged 16-bit checkpoint is converted separately with llama.cpp:
+
+```bash
+python convert_hf_to_gguf.py <MERGED_16BIT_DIR> \
+  --outfile qwen35-9b-p2s-f16.gguf \
+  --outtype f16
+
+./llama-quantize \
+  qwen35-9b-p2s-f16.gguf \
+  qwen35-9b-p2s-Q8_0.gguf \
+  Q8_0
+```
+
+The public GGUF repository is:
+
+```text
+minhhungg/p2s_gguf
+```
+
+and contains the F16 and Q8_0 forms used for local llama.cpp deployment.
+
+### 16.12 What to Retain for Reproducibility
+
+For a complete model-training reproduction, retain at minimum:
+
+```text
+p2s_colab_train.ipynb
+final_training_dataset.jsonl
+training stdout / notebook cell outputs
+checkpoint metadata or final trainer metrics
+qwen35-9b-p2s-lora/
+qwen35-9b-p2s-merged-16bit/
+qwen35-9b-p2s-merged-4bit/
+GGUF conversion command + llama.cpp revision
+qwen35-9b-p2s-f16.gguf or HF repository reference
+qwen35-9b-p2s-Q8_0.gguf or HF repository reference
+```
+
+The important methodological boundary is that the **dataset is produced by P2S**, while the **notebook is one reproducible consumer of that dataset for the specific Qwen3.5-9B specialization reported in this study**. A future user may train another architecture from the same JSONL without changing the P2S framework itself.
 
 ---
 

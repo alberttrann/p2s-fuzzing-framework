@@ -466,6 +466,50 @@ p2s/dataset/builder.py
 
 The final **2,266-record** corpus was used for response-only LoRA adaptation of Qwen3.5-9B with Unsloth.
 
+> **Framework boundary.** Model training is intentionally **not part of the official `p2s` runtime SDK**. The framework's responsibility ends at producing and preparing the execution-grounded corpus, including `final_training_dataset.jsonl`. For reproducibility, this repository also ships a **root-level Google Colab training notebook** (`p2s_colab_train.ipynb`) that consumes that JSONL and reproduces the Qwen3.5-9B LoRA training/export procedure used in the study. The notebook is a research reproduction/example artifact: it is not imported by `p2s`, is not required for proxy/compile/fuzz/data-generation workflows, and is not an API surface of the wheel.
+
+This separation is deliberate:
+
+| Layer | Responsibility | Public artifact |
+|---|---|---|
+| **P2S Framework / SDK** | capture traces, compile OpenAPI-grounded primitives, execute mutations, produce Golden/Silver data, build the final SFT JSONL | `p2s/`, CLI, wheel |
+| **Training reproduction notebook** | consume `final_training_dataset.jsonl`, fine-tune Qwen3.5-9B, save/export model artifacts | root `p2s_colab_train.ipynb` |
+| **Model deployment** | convert the merged 16-bit checkpoint to GGUF and serve the reported Q8_0 model | llama.cpp + HF model repositories |
+
+### Colab A100 reproduction notebook
+
+The notebook is designed so that the **only research data input you need to supply is the final JSONL produced by P2S**. For paper-parity reproduction:
+
+1. Run the P2S data pipeline until you have `final_training_dataset.jsonl`.
+2. Open the root-level `p2s_colab_train.ipynb` in Google Colab and select an **A100 80 GB** runtime.
+3. Upload/copy `final_training_dataset.jsonl` into the notebook working directory as:
+
+   ```text
+   /content/final_training_dataset.jsonl
+   ```
+
+4. Install the notebook-only training dependencies in Colab:
+
+   ```python
+   !pip install unsloth trl datasets
+   ```
+
+5. Run the notebook top-to-bottom. Optional Hugging Face push settings are isolated in the configuration cell (`PUSH_TO_HUB`, `HF_TOKEN`, `HF_USER`).
+
+The notebook performs more than a bare trainer call. It:
+
+- loads `unsloth/Qwen3.5-9B` in 4-bit mode;
+- applies LoRA to attention, MLP, embeddings, and the LM head while excluding vision layers;
+- scans the **entire dataset token-length distribution** before training;
+- uses **response-only masking** so prompt/history tokens are excluded from loss;
+- prints a real masking-ratio sanity check from the first dataloader batch;
+- runs a pre-training forward/backward GPU health probe;
+- checkpoints every 100 steps with resume support;
+- saves LoRA adapters plus merged 16-bit and merged 4-bit Hugging Face checkpoints; and
+- can optionally push those three outputs to Hugging Face Hub.
+
+The notebook does **not** make the P2S framework depend on Unsloth/TRL. Those packages are notebook-side research dependencies, which is why the minimal SDK installation remains lightweight.
+
 ### Main training configuration
 
 | Setting | Value |
@@ -517,7 +561,7 @@ Four Hugging Face repositories are part of the public artifact set:
 | Merged 16-bit | canonical merged checkpoint / GGUF source | [`minhhungg/qwen35-9b-p2s-merged-16bit`](https://huggingface.co/minhhungg/qwen35-9b-p2s-merged-16bit) |
 | GGUF | llama.cpp deployment (`F16`, `Q8_0`) | [`minhhungg/p2s_gguf`](https://huggingface.co/minhhungg/p2s_gguf) |
 
-The reported P2S evaluation uses the **Q8_0 GGUF**.
+The reported P2S evaluation uses the **Q8_0 GGUF**. The root Colab notebook exports the LoRA, merged 16-bit, and merged 4-bit Hugging Face formats. **GGUF conversion remains a separate post-training deployment step** performed from the merged 16-bit checkpoint with llama.cpp; this keeps the notebook focused on reproducing training rather than making llama.cpp part of the SDK or Colab training path.
 
 ### Download the reported GGUF
 
@@ -1017,7 +1061,7 @@ This table is intended specifically to make project assessment easier.
 | Golden / Silver dataset preparation | `p2s/dataset/builder.py` |
 | M1 / post-hoc evaluation | `p2s/analytics/` |
 | AITasker training-corpus reproduction | `docs/REPRODUCIBILITY.md` → AITasker section |
-| P2S Qwen fine-tuning | AITasker research artifact + training notebook |
+| P2S Qwen fine-tuning | root `p2s_colab_train.ipynb` (reproduction artifact; not part of SDK runtime) + AITasker training corpus |
 | LoRA / merged / GGUF checkpoints | Hugging Face repositories listed above |
 | Track A P2S / base / DeepSeek experiment | `docs/REPRODUCIBILITY.md` → SEAL Track A |
 | AutoRestTest baseline | `docs/REPRODUCIBILITY.md` → AutoRestTest Track A |
@@ -1043,7 +1087,12 @@ P2S research project
 │      primitive + compiled traces
 │      Golden + Silver JSONL
 │      final 2,266-record SFT JSONL
-│      training notebook
+│      historical experiment-side training notebook / logs
+│
+├── root p2s_colab_train.ipynb
+│      public Colab A100 reproduction helper
+│      consumes final_training_dataset.jsonl
+│      NOT part of the installed p2s SDK
 │
 ├── 3. P2S model artifacts
 │      LoRA
