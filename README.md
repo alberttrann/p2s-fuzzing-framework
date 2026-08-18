@@ -3,7 +3,7 @@
 > **Deep-State REST API Security Testing Beyond Code Coverage**
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue)
-![Release](https://img.shields.io/badge/release-v1.1.0-4c1)
+![Release](https://img.shields.io/badge/release-v1.2.0-4c1)
 ![Research](https://img.shields.io/badge/artifact-reproducible-purple)
 ![OpenAPI](https://img.shields.io/badge/interface-OpenAPI%20%2B%20OCLI-orange)
 
@@ -11,9 +11,42 @@
 
 The project focuses on security behaviors whose meaning depends on **identity, ownership, lifecycle state, prior requests, and business-flow history**. A request can be syntactically valid and reach the same code path as a legitimate request while still violating a security invariant—for example, modifying another user's resource, progressing an object before prerequisites are met, or exercising a privileged transition in the wrong state.
 
-This repository contains the reusable **P2S Framework / Python SDK** extracted from the research implementation.
+This repository contains **P2S Framework v1.2.0**, the unified public Python SDK extracted from the research implementation. The original experiments evolved through several one-off proxy/compiler/evaluator scripts; v1.2 moves those differences into declarative research profiles so the maintained reproduction path uses one shared implementation.
 
-> **Manuscript ↔ public artifact naming.** The anonymized manuscript refers to the training system as **SourceMarket** and the independent Track-A system as **HackathonBench**. In the public research artifacts these correspond to **AITasker** and the **SEAL Hackathon backend**, respectively.
+> **Public validation source.** The manuscript is still under anonymous review and is therefore not published in this repository. This README intentionally carries the project motivation, experimental design, headline results, limitations, model information, and reproduction entry points needed to validate the work publicly. The manuscript uses anonymized names **SourceMarket** and **HackathonBench**; the public artifacts correspond to **AITasker** and the **SEAL Hackathon backend**.
+
+
+## Start here — which path do you need?
+
+| Goal | Start here |
+|---|---|
+| **I only want to install P2S and see that it works** | [First-time setup](docs/GETTING_STARTED.md#1-install-and-verify-p2s) |
+| **I want to use P2S on my own authorized API** | [Your first target](docs/GETTING_STARTED.md#3-use-p2s-on-your-own-api) + [configuration reference](docs/CONFIGURATION_REFERENCE.md) |
+| **I want to reproduce the full research experiment** | [Framework-native reproduction](docs/REPRODUCIBILITY.md) |
+| **I want Track A only** | [Track A with P2S Framework](docs/TRACK_A_WITH_P2S_FRAMEWORK.md) |
+| **I want the 11-service RESTgym Track B** | [Track B with P2S Framework](docs/TRACK_B_WITH_P2S_FRAMEWORK.md) |
+| **I want to inspect exactly what the historical experiments used** | [`original_reporducibility_docs/`](original_reporducibility_docs/README.md) |
+| **I want to develop or rebuild the package** | [Build and release guide](docs/BUILD_AND_RELEASE.md) |
+
+A useful mental model is:
+
+```text
+install P2S
+   ↓
+choose/create a TOML profile
+   ↓
+p2s doctor
+   ↓
+prepare target → record a valid stateful workflow → compile against OpenAPI
+   ↓
+serve/configure an LLM
+   ↓
+fuzz / generate-data
+   ↓
+verify / deduplicate / analyze
+```
+
+**Installing the package is only the Python part.** To actually fuzz a target, you also need the target API itself, an OpenAPI document, OCLI or the raw-HTTP executor, a configured LLM endpoint for mutation generation, and whichever state-reset dependency your target uses (for example PostgreSQL, Docker, or MongoDB). Research reproduction additionally needs the AITasker, SEAL, or RESTgym target repository described in `docs/`.
 
 ---
 
@@ -23,9 +56,9 @@ P2S was trained from execution-grounded self-play on one application and evaluat
 
 ### Track A — independent deep-state backend
 
-The fine-tuned P2S Qwen3.5-9B specialist was evaluated zero-shot on an independently developed **128-endpoint Spring Boot / PostgreSQL backend with 21 stateful business flows**. The same P2S harness was used for the fine-tuned model, DeepSeek-V4-Flash, and an architecture-matched untuned Qwen3.5-9B control.
+The fine-tuned P2S Qwen3.5-9B specialist was evaluated zero-shot on an independently developed **128-endpoint Spring Boot / PostgreSQL backend with 21 stateful business flows**. The same P2S harness was used for the fine-tuned model, DeepSeek-V4-Flash-3107, and an architecture-matched untuned Qwen3.5-9B control.
 
-| Metric | **P2S Fine-Tuned** | DeepSeek-V4-Flash | Base Qwen3.5-9B |
+| Metric | **P2S Fine-Tuned** | DeepSeek-V4-Flash-3107 | Base Qwen3.5-9B |
 |---|---:|---:|---:|
 | Executed records | 1,075 | 1,094 | 1,122 |
 | Candidate goldens | 48 | 29 | 21 |
@@ -39,7 +72,7 @@ The fine-tuned P2S Qwen3.5-9B specialist was evaluated zero-shot on an independe
 | **Validated-outcome rate** | **2.9%** | 2.4% | 1.4% |
 | Records / validated outcome ↓ | **34.7** | 42.1 | 70.1 |
 
-In this single-run evaluation, P2S produced approximately **2.02× the validated-outcome rate of the untuned architecture-matched control** and **1.21× that of DeepSeek-V4-Flash**.
+In this single-run evaluation, P2S produced approximately **2.02× the validated-outcome rate of the untuned architecture-matched control** and **1.21× that of DeepSeek-V4-Flash-3107**.
 
 The important distinction is that **candidate goldens are not automatically claimed as vulnerabilities**. Track A applies an explicit post-hoc validator before reporting semantic security findings.
 
@@ -466,50 +499,6 @@ p2s/dataset/builder.py
 
 The final **2,266-record** corpus was used for response-only LoRA adaptation of Qwen3.5-9B with Unsloth.
 
-> **Framework boundary.** Model training is intentionally **not part of the official `p2s` runtime SDK**. The framework's responsibility ends at producing and preparing the execution-grounded corpus, including `final_training_dataset.jsonl`. For reproducibility, this repository also ships a **root-level Google Colab training notebook** (`p2s_colab_train.ipynb`) that consumes that JSONL and reproduces the Qwen3.5-9B LoRA training/export procedure used in the study. The notebook is a research reproduction/example artifact: it is not imported by `p2s`, is not required for proxy/compile/fuzz/data-generation workflows, and is not an API surface of the wheel.
-
-This separation is deliberate:
-
-| Layer | Responsibility | Public artifact |
-|---|---|---|
-| **P2S Framework / SDK** | capture traces, compile OpenAPI-grounded primitives, execute mutations, produce Golden/Silver data, build the final SFT JSONL | `p2s/`, CLI, wheel |
-| **Training reproduction notebook** | consume `final_training_dataset.jsonl`, fine-tune Qwen3.5-9B, save/export model artifacts | root `p2s_colab_train.ipynb` |
-| **Model deployment** | convert the merged 16-bit checkpoint to GGUF and serve the reported Q8_0 model | llama.cpp + HF model repositories |
-
-### Colab A100 reproduction notebook
-
-The notebook is designed so that the **only research data input you need to supply is the final JSONL produced by P2S**. For paper-parity reproduction:
-
-1. Run the P2S data pipeline until you have `final_training_dataset.jsonl`.
-2. Open the root-level `p2s_colab_train.ipynb` in Google Colab and select an **A100 80 GB** runtime.
-3. Upload/copy `final_training_dataset.jsonl` into the notebook working directory as:
-
-   ```text
-   /content/final_training_dataset.jsonl
-   ```
-
-4. Install the notebook-only training dependencies in Colab:
-
-   ```python
-   !pip install unsloth trl datasets
-   ```
-
-5. Run the notebook top-to-bottom. Optional Hugging Face push settings are isolated in the configuration cell (`PUSH_TO_HUB`, `HF_TOKEN`, `HF_USER`).
-
-The notebook performs more than a bare trainer call. It:
-
-- loads `unsloth/Qwen3.5-9B` in 4-bit mode;
-- applies LoRA to attention, MLP, embeddings, and the LM head while excluding vision layers;
-- scans the **entire dataset token-length distribution** before training;
-- uses **response-only masking** so prompt/history tokens are excluded from loss;
-- prints a real masking-ratio sanity check from the first dataloader batch;
-- runs a pre-training forward/backward GPU health probe;
-- checkpoints every 100 steps with resume support;
-- saves LoRA adapters plus merged 16-bit and merged 4-bit Hugging Face checkpoints; and
-- can optionally push those three outputs to Hugging Face Hub.
-
-The notebook does **not** make the P2S framework depend on Unsloth/TRL. Those packages are notebook-side research dependencies, which is why the minimal SDK installation remains lightweight.
-
 ### Main training configuration
 
 | Setting | Value |
@@ -561,7 +550,7 @@ Four Hugging Face repositories are part of the public artifact set:
 | Merged 16-bit | canonical merged checkpoint / GGUF source | [`minhhungg/qwen35-9b-p2s-merged-16bit`](https://huggingface.co/minhhungg/qwen35-9b-p2s-merged-16bit) |
 | GGUF | llama.cpp deployment (`F16`, `Q8_0`) | [`minhhungg/p2s_gguf`](https://huggingface.co/minhhungg/p2s_gguf) |
 
-The reported P2S evaluation uses the **Q8_0 GGUF**. The root Colab notebook exports the LoRA, merged 16-bit, and merged 4-bit Hugging Face formats. **GGUF conversion remains a separate post-training deployment step** performed from the merged 16-bit checkpoint with llama.cpp; this keeps the notebook focused on reproducing training rather than making llama.cpp part of the SDK or Colab training path.
+The reported P2S evaluation uses the **Q8_0 GGUF**.
 
 ### Download the reported GGUF
 
@@ -640,7 +629,7 @@ The target therefore differs from training in language, framework, schema, vocab
 Three model backends share the P2S evaluator:
 
 1. **P2S fine-tuned Qwen3.5-9B Q8_0**;
-2. **DeepSeek-V4-Flash**;
+2. **DeepSeek-V4-Flash-3107**;
 3. **untuned Qwen3.5-9B Q8_0**.
 
 A fresh OpenAPI document is fetched before trace compilation and every P2S mutation is executed against reconstructed state.
@@ -749,29 +738,23 @@ Each service receives a **one-hour P2S run**.
 
 The service-specific reset mechanisms are important: they demonstrate that P2S is not hard-coded to the PostgreSQL environment used for training.
 
-The generic experimental shape is:
+In v1.2, the generic execution shape is framework-native and the service-specific differences live in TOML:
 
 ```bash
-python3 trace_compiler.py \
-  --swagger <service-spec> \
-  --input <primitive_traces.jsonl> \
-  --output <compiled_traces.jsonl> \
-  --catalog <ocli_catalog.json>
+export RESTGYM_ROOT=/path/to/restgym
 
-python3 eval_student_p2s_engine.py \
-  --target-port 9090 \
-  --traces <compiled_traces.jsonl> \
-  --catalog <ocli_catalog.json> \
-  --output-prefix <service>_p2s \
-  --time-budget 3600
-
-python dedup_p2s_goldens.py \
-  <service>_p2s_golden_dataset.jsonl
-
-# JaCoCo dump -> results/<service>/code-coverage/coverage.csv
+# Example: one Track-B service
+p2s doctor  -c configs/research/track_b/pet-clinic.toml --workdir runs/track-b/pet-clinic
+p2s prepare -c configs/research/track_b/pet-clinic.toml --workdir runs/track-b/pet-clinic
+p2s record  -c configs/research/track_b/pet-clinic.toml --workdir runs/track-b/pet-clinic
+p2s compile -c configs/research/track_b/pet-clinic.toml --workdir runs/track-b/pet-clinic
+p2s fuzz    -c configs/research/track_b/pet-clinic.toml --workdir runs/track-b/pet-clinic --time-budget 3600 --cyclic
+p2s coverage -c configs/research/track_b/pet-clinic.toml --workdir runs/track-b/pet-clinic
+p2s fd --golden-file runs/track-b/pet-clinic/petclinic_p2s_golden_dataset.jsonl \
+  --dedup-out runs/track-b/pet-clinic/petclinic_strict_5xx.jsonl
 ```
 
-The complete service-by-service commands and patches are retained in [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md).
+RESTgym's own mitmproxy remains semantically active on port `9090` where the benchmark requires authentication or request rewriting; P2S does not replace it. The complete per-service patches, launch rules, authentication behavior, reset commands, and coverage steps are documented in [`docs/TRACK_B_WITH_P2S_FRAMEWORK.md`](docs/TRACK_B_WITH_P2S_FRAMEWORK.md).
 
 ---
 
@@ -859,478 +842,351 @@ This is the headline semantic comparison between P2S, DeepSeek, and base Qwen.
 
 ---
 
-# Install the SDK
+---
 
-## From the release wheel
+# Installing P2S — what the commands actually do
 
-```bash
-pip install p2s_framework-1.1.0-py3-none-any.whl
+There are two normal installation modes. **Choose one; you do not need both.**
+
+## Option A — install the wheel
+
+Use this when you want to consume P2S as a package without editing its source.
+
+### 1. Open a terminal in the directory containing the wheel
+
+In a release bundle it is normally under `dist/`:
+
+```text
+dist/p2s_framework-1.2.0-py3-none-any.whl
 ```
 
-## Editable development install
+### 2. Create an isolated Python environment
 
 ```bash
-git clone <THIS_REPOSITORY_URL>
-cd p2s-framework
-pip install -e .
+python -m venv .venv
 ```
 
-Verify the installation:
+Activate it with the command appropriate for your shell:
 
 ```bash
+# Windows Git Bash
+source .venv/Scripts/activate
+
+# Windows PowerShell
+# .venv\Scripts\Activate.ps1
+
+# Windows cmd.exe
+# .venv\Scripts\activate.bat
+
+# Linux / macOS
+# source .venv/bin/activate
+```
+
+### 3. Install the wheel
+
+From the release root:
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install ./dist/p2s_framework-1.2.0-py3-none-any.whl
+```
+
+If the wheel is in the current directory instead:
+
+```bash
+python -m pip install ./p2s_framework-1.2.0-py3-none-any.whl
+```
+
+`pip` automatically installs the Python runtime dependencies declared in `pyproject.toml` (`httpx`, `openai`, `psycopg2-binary`, `PyYAML`, and `tomli` on Python < 3.11).
+
+### 4. Verify the installation
+
+```bash
+python -c "import p2s; print(p2s.__version__)"
 p2s --help
 python -m p2s --help
 ```
 
-Python **3.10+** is supported by the packaged SDK.
+Expected version:
+
+```text
+1.2.0
+```
+
+## Option B — install from source in editable mode
+
+Use this when you cloned the GitHub repository and want changes to `p2s/` to take effect immediately.
+
+```bash
+git clone <THIS_REPOSITORY_URL>
+cd <P2S_REPOSITORY_ROOT>    # the directory containing pyproject.toml
+
+python -m venv .venv
+source .venv/Scripts/activate       # Git Bash / Windows
+# source .venv/bin/activate         # Linux/macOS
+
+python -m pip install --upgrade pip
+python -m pip install -e .
+```
+
+For contributors/tests/build tooling:
+
+```bash
+python -m pip install -e ".[dev]"
+python -m pytest -q
+```
+
+For the optional in-process Transformers backend:
+
+```bash
+python -m pip install -e ".[transformers]"
+```
+
+Editable install means Python imports the package from your working tree rather than copying a fixed snapshot into `site-packages`.
+
+## What else is required after installation?
+
+For **`import p2s` / SDK inspection**, nothing beyond the Python installation is required.
+
+For **actual P2S execution**, install/configure the pieces used by your chosen target:
+
+| Need | Why |
+|---|---|
+| Target API | P2S executes mutations against a live, authorized test target |
+| OpenAPI / Swagger document | grounds captured HTTP traffic into executable operations |
+| Node.js + OCLI | default research executor used to generate/execute OpenAPI-grounded CLI commands |
+| LLM endpoint | produces state-conditioned mutations; OpenAI-compatible endpoints are supported |
+| State-reset tooling | PostgreSQL / Docker / MongoDB / file / arbitrary command depending on target |
+| Target research repo | only for reproducing AITasker, SEAL Track A, or RESTgym Track B |
+
+Install OCLI separately because it is a Node.js tool rather than a Python dependency:
+
+```bash
+npm install -g openapi-to-cli
+ocli --help
+```
+
+Then read [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md), which walks through the first config, `doctor`, target preparation, trace recording, compilation, model configuration, fuzzing, and outputs.
 
 ---
 
-# Python SDK quick start
+# First-time usage — the shortest useful workflow
+
+P2S is configuration-driven. The same Python implementation is reused; the TOML file describes target-specific URLs, patches, authentication, state resets, trace handling, and model endpoint.
+
+```bash
+# 0. activate the virtual environment first
+source .venv/Scripts/activate
+
+# 1. inspect whether the target/config prerequisites exist
+p2s doctor -c path/to/target.toml --workdir runs/my-target
+
+# 2. apply configured safe/idempotent target patches and launch/readiness steps
+p2s prepare -c path/to/target.toml --workdir runs/my-target
+
+# 3. execute/freeze a representative valid workflow
+p2s record -c path/to/target.toml --workdir runs/my-target
+
+# 4. compile HTTP trace → OpenAPI-grounded executable trace + OCLI catalog
+p2s compile -c path/to/target.toml --workdir runs/my-target
+
+# 5. run state-conditioned mutation/evaluation
+p2s fuzz -c path/to/target.toml --workdir runs/my-target
+
+# 6. collect target coverage when configured
+p2s coverage -c path/to/target.toml --workdir runs/my-target
+
+# 7. cleanup launched research resources when configured
+p2s cleanup -c path/to/target.toml --workdir runs/my-target
+```
+
+You do **not** need to run every command separately when the profile's `prepare` stage already performs patch/fetch/auth/launch work; the explicit commands are exposed so researchers can inspect and debug each stage independently.
+
+### What files should appear?
+
+A typical run directory evolves roughly as follows:
+
+```text
+runs/my-target/
+├── primitive_traces.jsonl
+├── compiled_traces.jsonl
+├── ocli_catalog.json
+├── *_golden_dataset.jsonl
+├── *_silver_dataset.jsonl
+├── *_processed_flows.txt
+├── *_execution_log.txt
+└── *_run_metadata.json
+```
+
+Golden files are **candidate execution-positive findings**. They are not automatically verified vulnerabilities. Track A uses an additional semantic validation/deduplication step; Track B's benchmark FD comparison filters to 5xx before deduplication.
+
+---
+
+# Python SDK — the same lifecycle without shell commands
 
 ```python
 from p2s import P2S
 
 sdk = P2S.from_toml(
-    "configs/target.toml",
-    workdir="runs/target",
+    "configs/research/track_a_seal_p2s.toml",
+    workdir="runs/track-a/p2s",
 )
 
-# 1. primitive traces -> OpenAPI-grounded executable traces
+issues = sdk.doctor()
+if issues:
+    raise RuntimeError("\n".join(issues))
+
+sdk.prepare()
+sdk.record()
 compiled, catalog = sdk.compile()
-
-# 2. execution-verified evaluation
 fuzzer = sdk.fuzz()
-
-# 3. execution-grounded self-play training data
-sdk.generate_data()
-
-# 4. deduplicate / stratify training corpus
-sdk.prepare_dataset()
+print(fuzzer.metrics)
+sdk.coverage()
+sdk.cleanup()
 ```
 
-The facade intentionally stays thin: SDK calls and the CLI reuse the same underlying framework implementation.
+The high-level facade intentionally mirrors the CLI. See [`SDK_GUIDE.md`](SDK_GUIDE.md) for the method-by-method guide, custom-target walkthrough, adapters, generated artifacts, and troubleshooting.
 
 ---
 
-# CLI
-
-```bash
-# Capture traffic
-p2s proxy --config configs/target.toml
-
-# Compile primitive traces
-p2s compile --config configs/target.toml
-
-# Evaluate a model
-p2s fuzz --config configs/target.toml
-
-# Generate execution-grounded SFT data
-p2s generate-data --config configs/target.toml
-
-# Build final deduplicated / stratified corpus
-p2s prepare-dataset --config configs/target.toml
-```
-
-Post-hoc tooling:
-
-```bash
-p2s verify
-p2s analyze
-p2s reclassify
-p2s m1
-```
-
-Available command families in v1.1.0:
+# CLI reference
 
 ```text
-proxy
-compile
-fuzz
-generate-data
-prepare-dataset
-analyze
-reclassify
-m1
-verify
+p2s doctor             preflight configuration/environment
+p2s patch              apply configured idempotent target patches
+p2s fetch-openapi      fetch/sanitize configured OpenAPI
+p2s auth               acquire controlled test credential
+p2s prepare            patch + prepare/launch/readiness + OpenAPI/auth
+p2s proxy              run the P2S trace-capture proxy
+p2s record             run workload/freeze baseline primitive trace
+p2s compile            primitive trace → executable OpenAPI-grounded trace
+p2s fuzz               state-conditioned mutation + live execution
+p2s generate-data      execution-grounded self-play corpus generation
+p2s prepare-dataset    deduplicate/stratify final SFT dataset
+p2s coverage           run target-specific coverage collection
+p2s cleanup            run configured cleanup
+p2s analyze            summarize Golden/Silver run artifacts
+p2s reclassify         attack-vector post-hoc classification
+p2s m1                 syntax/execution-pass analysis
+p2s verify             Track-A candidate verification/dedup pipeline
+p2s fd                 strict 5xx-before-dedup Track-B fault proxy
 ```
+
+`python -m p2s ...` is equivalent to the `p2s ...` console command.
 
 ---
 
-# Example configuration
+# Configuration: where target-specific behavior lives
+
+A minimal conceptual profile looks like this:
 
 ```toml
 [target]
-name = "seal_hackathon"
+name = "my_api"
 base_url = "http://localhost:8080/api"
-openapi_spec = "seal_openapi.json"
-state_adapter = "postgres"
+openapi_spec = "openapi.json"
+state_adapter = "docker"
 executor_adapter = "ocli"
-golden_out = "llamacpp_golden_dataset.jsonl"
-silver_out = "llamacpp_silver_dataset.jsonl"
-checkpoint_file = "processed_flows.txt"
-
-[postgres]
-active_db = "seal_hackathon"
-template_db = "seal_hackathon_snap"
-admin_url = "postgresql://postgres:postgres@localhost:5432/postgres"
-seed_command = "psql -U postgres -d seal_hackathon -f seal_hackathon_full.sql"
-setup_script = "hooks/seal_setup_hook.py"
+golden_out = "my_api_golden_dataset.jsonl"
+silver_out = "my_api_silver_dataset.jsonl"
 
 [llm]
 backend = "openai_compat"
 base_url = "http://localhost:8081/v1"
-model = "qwen35-9b-p2s"
+model = "my-model"
 api_key = "no-key"
 max_attempts = 6
+
+[ocli]
+profile_name = "my_api"
+api_base_url = "http://localhost:8080/api"
+openapi_spec = "openapi.json"
+
+[docker]
+container_name = "my_api"
+restart_sleep_seconds = 3.0
 
 [proxy]
 listen_port = 8090
 target_host = "http://localhost:8080"
 flow_strategy = "header"
+flow_header = "X-Flow-ID"
 output_file = "primitive_traces.jsonl"
 ```
 
-The SDK supports OpenAI-compatible model servers such as `llama.cpp` and LM Studio, plus local Transformers-based inference.
+Research profiles add `[research]`, `[openapi_setup]`, `[auth]`, `[[patches]]`, and target-specific state sections. The authoritative schema is [`docs/CONFIGURATION_REFERENCE.md`](docs/CONFIGURATION_REFERENCE.md).
 
 ---
 
-# Repository map — where to inspect the implementation
+# Reproducing the research with v1.2
 
-A professor or reviewer can validate the implementation from the following files without reading the full technical reference first.
+The public reproduction path deliberately uses **one P2S package** rather than the slightly different P2S helper files used during development.
+
+```text
+AITasker workload/state facts ─┐
+SEAL workload/state facts ─────┼──> configs/research/*.toml ──> shared p2s package
+RESTgym service facts ─────────┘
+```
+
+Start with [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md). It branches into:
+
+- [`docs/TRACK_A_WITH_P2S_FRAMEWORK.md`](docs/TRACK_A_WITH_P2S_FRAMEWORK.md) — P2S / Base Qwen / DeepSeek on SEAL plus AutoRestTest, CATS, Schemathesis;
+- [`docs/TRACK_B_WITH_P2S_FRAMEWORK.md`](docs/TRACK_B_WITH_P2S_FRAMEWORK.md) — the exact service patches/auth/proxy/reset requirements for all 11 RESTgym services;
+- [`docs/MODEL_AND_TRAINING.md`](docs/MODEL_AND_TRAINING.md) — corpus preparation, Qwen3.5-9B LoRA training, exports, and llama.cpp serving.
+
+The original one-off scripts and historical instructions remain under [`original_reporducibility_docs/`](original_reporducibility_docs/README.md) so reviewers can audit how the normalized framework maps back to the experiment implementation.
+
+**Resolved baseline configuration:** the completed original AutoRestTest Track-A run used **DeepSeek-V4-Flash-3107**. Older AutoRestTest local-base-Qwen material is historical only.
+
+---
+
+# Repository map
 
 ```text
 p2s/
-├── __init__.py
-├── __main__.py
-├── sdk.py                         # public P2S / P2SClient facade
-├── cli.py                         # `p2s ...` command dispatcher
-├── config.py                      # TOML configuration loading
-│
-├── proxy/
-│   └── core_proxy.py              # transparent trace capture
-│
-├── compiler/
-│   └── compiler.py                # OpenAPI route matching + OCLI compilation
-│
-├── engine/
-│   ├── taxonomy.py                # mutation taxonomy + prompt rules
-│   ├── generator.py               # self-play / training-data generation
-│   ├── fuzzer.py                  # execution-verified evaluator
-│   └── adapters/
-│       ├── state_adapter.py       # target state reset / snapshot abstraction
-│       ├── executor.py            # OCLI / HTTP execution abstraction
-│       └── llm_adapter.py         # local / OpenAI-compatible inference
-│
-├── dataset/
-│   └── builder.py                 # deduplication + final SFT corpus
-│
-└── analytics/
-    ├── verifier.py                # Golden verification / FP filtering
-    ├── analyzer.py                # cross-run metrics / reporting
-    ├── reclassifier.py            # attack-vector post-hoc classification
-    └── m1_analyzer.py             # CLI syntax-pass analysis
-```
+├── proxy/            trace capture
+├── compiler/         OpenAPI/OCLI grounding
+├── engine/           mutation, execution, state adapters, LLM adapters
+├── dataset/          self-play corpus construction
+├── analytics/        verification, reclassification, metrics, strict 5xx FD
+└── research/         patch/launch/auth/OpenAPI/coverage lifecycle orchestration
 
-Other important files:
-
-```text
-configs/aitasker.toml
-configs/seal_hackathon.toml
-hooks/seal_setup_hook.py
-SDK_GUIDE.md
-docs/P2S_FRAMEWORK_REFERENCE.md
-docs/REPRODUCIBILITY.md
-tests/test_sdk_smoke.py
-pyproject.toml
+configs/research/     framework-native profiles for the full study
+docs/                 canonical v1.2 framework-native documentation
+original_reporducibility_docs/
+                      frozen historical procedures/helpers for audit fidelity
+tests/                framework and research-regression tests
+SDK_GUIDE.md          Python API / first-user guide
+pyproject.toml        package metadata and dependencies
 ```
 
 ---
 
-# Paper → artifact validation map
+# What are `build/` and `dist/`?
 
-This table is intended specifically to make project assessment easier.
-
-| Paper / research claim | Where to validate |
-|---|---|
-| Transparent HTTP trace capture | `p2s/proxy/core_proxy.py` |
-| OpenAPI grounding and executable CLI representation | `p2s/compiler/compiler.py` |
-| 15-vector mutation taxonomy | `p2s/engine/taxonomy.py` |
-| State replay / isolated mutation execution | `p2s/engine/fuzzer.py`, `p2s/engine/adapters/state_adapter.py` |
-| Self-play training-data generation | `p2s/engine/generator.py` |
-| Golden / Silver dataset preparation | `p2s/dataset/builder.py` |
-| M1 / post-hoc evaluation | `p2s/analytics/` |
-| AITasker training-corpus reproduction | `docs/REPRODUCIBILITY.md` → AITasker section |
-| P2S Qwen fine-tuning | root `p2s_colab_train.ipynb` (reproduction artifact; not part of SDK runtime) + AITasker training corpus |
-| LoRA / merged / GGUF checkpoints | Hugging Face repositories listed above |
-| Track A P2S / base / DeepSeek experiment | `docs/REPRODUCIBILITY.md` → SEAL Track A |
-| AutoRestTest baseline | `docs/REPRODUCIBILITY.md` → AutoRestTest Track A |
-| CATS / Schemathesis baselines | `docs/REPRODUCIBILITY.md` → CATS & Schemathesis |
-| Track B 11-service benchmark | `docs/REPRODUCIBILITY.md` → RESTgym Track B |
-| Per-service coverage artifacts | RESTgym research artifact `results/<service>/code-coverage/coverage.csv` |
-
----
-
-# Full research artifact ecosystem
-
-The SDK repository is deliberately kept separate from large datasets, benchmark repositories, and model checkpoints.
+They are **packaging outputs**, not core P2S source code.
 
 ```text
-P2S research project
-│
-├── 1. p2s-framework
-│      reusable Python SDK / CLI
-│      ← this repository
-│
-├── 2. AITasker training artifact
-│      proxy / compiler / P2S generation workflow
-│      primitive + compiled traces
-│      Golden + Silver JSONL
-│      final 2,266-record SFT JSONL
-│      historical experiment-side training notebook / logs
-│
-├── root p2s_colab_train.ipynb
-│      public Colab A100 reproduction helper
-│      consumes final_training_dataset.jsonl
-│      NOT part of the installed p2s SDK
-│
-├── 3. P2S model artifacts
-│      LoRA
-│      merged 4-bit
-│      merged 16-bit
-│      GGUF F16 + Q8_0
-│
-├── 4. Track A — SEAL / HackathonBench artifact
-│      P2S fine-tuned run
-│      base-Qwen run
-│      DeepSeek run
-│      verified / reclassified JSONL
-│      AutoRestTest artifacts
-│      CATS report
-│      Schemathesis artifacts
-│
-├── 5. Track B — RESTgym artifact
-│      11 services / 317 operations
-│      primitive + compiled traces
-│      Golden / Silver JSONL per service
-│      results/<service>/code-coverage/coverage.csv
-│
-└── 6. AutoRestTest-SEAL artifact
-       data/seal_openapi/*.json
-       generated graph / Q-table / error artifacts
+build/      temporary setuptools build workspace
+            generated while building the package; safe to delete/regenerate
+
+dist/       final distributable artifacts
+            e.g. p2s_framework-1.2.0-py3-none-any.whl and optionally .tar.gz
+
+*.egg-info/ generated package metadata during editable/source builds
 ```
 
-The separation has two benefits:
-
-1. `pip install` remains a lightweight reusable framework rather than downloading gigabytes of experiment data;
-2. research outputs remain auditable in the repositories where they were actually produced.
-
----
-
-# Reproduce the research
-
-The detailed reproduction guide is:
-
-> **[`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md)**
-
-It contains exact setup, files, commands, target-specific patches, reset mechanisms, and output locations for five complete research operations:
-
-### 1. AITasker — training-data generation
-
-```text
-git clone AITasker
-switch feat/hung/SWT-Main
-      ↓
-run FastAPI + NestJS
-      ↓
-P2S proxy
-      ↓
-20 mainflow scripts
-      ↓
-primitive traces
-      ↓
-OpenAPI-grounded compilation
-      ↓
-base Qwen3.5-9B self-play
-      ↓
-Golden / Silver
-      ↓
-dedup + stratification
-      ↓
-final_training_dataset.jsonl
-      ↓
-LoRA fine-tuning
-```
-
-### 2. Track A — P2S / base Qwen / DeepSeek on SEAL
-
-Includes:
-
-- PostgreSQL reset and seed;
-- Spring Boot launch;
-- header-tagged trace capture;
-- 21 business flows;
-- trace compilation;
-- P2S evaluator configuration;
-- llama.cpp P2S serving;
-- base-Qwen and DeepSeek comparison runs;
-- Golden validation;
-- deduplication;
-- vector reclassification;
-- final analytics.
-
-### 3. AutoRestTest Track A
-
-Includes the exact AutoRestTest repository setup, protected OpenAPI document, Coordinator token handling, five-hour run, socket-throttling fix, `data/seal_openapi/` artifacts, and post-hoc parsing.
-
-### 4. CATS + Schemathesis Track A
-
-Includes the same stabilized SEAL contract / authentication environment and exact commands used to produce `cats_report/`, JUnit, VCR, and `.schemathesis/` artifacts.
-
-### 5. RESTgym Track B
-
-Includes all eleven services individually:
-
-```text
-blog
-erc20
-features-service
-flight-search
-gestao-hospital
-kafka-rest-proxy
-market
-notebook-manager
-person-controller
-pet-clinic
-project-tracking-system
-```
-
-with each service's Docker build, trace recording script, OpenAPI file, compiler command, one-hour P2S invocation, reset strategy, post-processing, and JaCoCo extraction.
-
----
-
-# Framework path vs historical experiment path
-
-The research evolved before the reusable SDK was extracted, so the raw experimental repositories contain several task-specific versions of:
-
-```text
-proxy.py
-trace_compiler.py
-eval_student_p2s_engine.py
-```
-
-The public framework normalizes those implementations into reusable modules.
-
-```text
-historical proxy variants
-        ↓
-p2s.proxy
-
-historical trace compilers
-        ↓
-p2s.compiler
-
-AITasker self-play engine
-        ↓
-p2s.engine.generator
-
-SEAL / RESTgym evaluation engines
-        ↓
-p2s.engine.fuzzer
-        + target state adapters
-```
-
-For **paper-exact reproduction**, follow the historical-parity commands documented in `docs/REPRODUCIBILITY.md`.
-
-For **new systems and normal SDK use**, use the generalized `p2s` package.
-
-This distinction is explicit so the repository does not falsely imply that every historical benchmark-specific workaround existed in exactly the same abstraction during the original experiment.
-
----
-
-# Extending P2S to a new API
-
-At a high level, integrating another OpenAPI-described system requires four things:
-
-```text
-1. representative successful flows
-2. an OpenAPI document
-3. an execution adapter / target URL
-4. a repeatable state-reset strategy
-```
-
-Then:
+For ordinary development you only need the source tree plus a virtual environment. A clean rebuild is:
 
 ```bash
-p2s proxy --config configs/new_target.toml
-# exercise representative flows through the proxy
-
-p2s compile --config configs/new_target.toml
-
-p2s fuzz --config configs/new_target.toml
+python -m pip install -e ".[dev]"
+python -m pytest -q
+python -m build
 ```
 
-For self-play data generation instead of evaluation:
+For a GitHub project, a common practice is to keep `build/`, `dist/`, and `*.egg-info/` out of normal source commits and attach the wheel to a GitHub Release. This release bundle keeps a `dist/` wheel as a convenience artifact, but the directory can always be regenerated from `pyproject.toml` + source.
 
-```bash
-p2s generate-data --config configs/new_target.toml
-p2s prepare-dataset --config configs/new_target.toml
-```
-
-P2S does **not** automatically discover every meaningful business flow. Representative traces remain an important source of semantic reachability. The proxy simply makes those flows reusable once they have been exercised.
-
----
-
-# Verification checklist for reviewers / instructors
-
-A quick repository audit can be performed in roughly this order:
-
-### A. Package integrity
-
-```bash
-python -m venv .venv
-source .venv/bin/activate        # Linux/macOS
-# .venv\Scripts\activate         # Windows PowerShell
-
-pip install -e .
-p2s --help
-pytest -q
-```
-
-### B. Inspect architectural modules
-
-```text
-p2s/proxy/core_proxy.py
-p2s/compiler/compiler.py
-p2s/engine/fuzzer.py
-p2s/engine/generator.py
-p2s/engine/taxonomy.py
-p2s/engine/adapters/
-p2s/dataset/builder.py
-p2s/analytics/
-```
-
-### C. Inspect research configuration
-
-```text
-configs/aitasker.toml
-configs/seal_hackathon.toml
-hooks/seal_setup_hook.py
-```
-
-### D. Inspect reproduction protocol
-
-```text
-docs/REPRODUCIBILITY.md
-```
-
-### E. Inspect model artifacts
-
-Use the four Hugging Face repositories in the **Published model artifacts** section.
-
-### F. Cross-check paper results
-
-Track-A and Track-B headline values are reproduced in the tables near the top of this README, with their limitations stated alongside them.
+See [`docs/BUILD_AND_RELEASE.md`](docs/BUILD_AND_RELEASE.md).
 
 ---
 
@@ -1386,40 +1242,33 @@ These are documented because reproducibility means reproducing both the results 
 
 | Document | Purpose |
 |---|---|
-| [`README.md`](README.md) | research overview, results, architecture, quick validation |
-| [`SDK_GUIDE.md`](SDK_GUIDE.md) | Python SDK usage and integration |
-| [`docs/P2S_FRAMEWORK_REFERENCE.md`](docs/P2S_FRAMEWORK_REFERENCE.md) | full implementation reference |
-| [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md) | complete paper-level experimental reproduction |
-| [`CHANGELOG.md`](CHANGELOG.md) | release history |
+| [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md) | first installation and first target, step by step |
+| [`SDK_GUIDE.md`](SDK_GUIDE.md) | detailed Python SDK + CLI usage |
+| [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md) | canonical full research reproduction |
+| [`docs/TRACK_A_WITH_P2S_FRAMEWORK.md`](docs/TRACK_A_WITH_P2S_FRAMEWORK.md) | Track A setup, model controls, external baselines |
+| [`docs/TRACK_B_WITH_P2S_FRAMEWORK.md`](docs/TRACK_B_WITH_P2S_FRAMEWORK.md) | all 11 RESTgym service adaptations |
+| [`docs/MODEL_AND_TRAINING.md`](docs/MODEL_AND_TRAINING.md) | training/export/serving |
+| [`docs/CONFIGURATION_REFERENCE.md`](docs/CONFIGURATION_REFERENCE.md) | TOML schema |
+| [`docs/HISTORICAL_TO_FRAMEWORK_MAPPING.md`](docs/HISTORICAL_TO_FRAMEWORK_MAPPING.md) | old helper → v1.2 mapping |
+| [`docs/BUILD_AND_RELEASE.md`](docs/BUILD_AND_RELEASE.md) | wheel/source build artifacts and releases |
+| [`original_reporducibility_docs/`](original_reporducibility_docs/README.md) | frozen historical parity archive |
 
 ---
 
-# Research paper
+# Public research status
 
-This repository is the software artifact for:
-
-> **P2S: Primitive-to-Semantics for Deep-State REST API Security Testing Beyond Code Coverage**
-
-The manuscript's central empirical argument is not that code coverage or conventional REST testing is “wrong.” It is that modern API-security evaluation benefits from an additional semantic axis for outcomes that depend on identity, ownership, lifecycle state, and prior requests.
-
-A formal citation / DOI can be added here once the paper's public bibliographic record is available.
+The manuscript is still in anonymous review, so the paper PDF and identifying submission material are intentionally not published here. The README therefore acts as the public high-level research record: it documents the problem, architecture, data generation, training setup, evaluation design, headline results, metric boundaries, limitations, public models, and reproduction entry points without requiring access to the submission PDF.
 
 ---
 
 # Responsible use
 
-P2S generates adversarial REST API mutations. Use it only against:
-
-- systems you own;
-- systems for which you have explicit authorization to test; or
-- isolated benchmark / research environments.
-
-The reported experiments were performed against local or Dockerized systems under study control with resettable state. Do not point the framework at third-party production services without authorization.
+P2S is intended for security testing of systems you own, local research benchmarks, disposable test deployments, and systems for which you have explicit authorization. The supplied research profiles are designed around controlled local/Dockerized targets. Do not point the framework at third-party production services without permission.
 
 ---
 
 # Release
 
-**v1.1.0 — first public P2S Python SDK release**
+**P2S Framework v1.2.0** is the framework-native research-reproduction release.
 
-The v1.1.0 release packages the reusable framework independently from the large research datasets, benchmark repositories, and model checkpoints while preserving exact experimental procedures in `docs/REPRODUCIBILITY.md`.
+Its main architectural change is that AITasker, SEAL Track A, and RESTgym Track B now share the same public P2S implementation; target-specific patches, authentication, state restoration, workload handling, and lifecycle steps are represented declaratively in research TOML profiles. Historical one-off implementations are retained separately for audit fidelity rather than used as the default user path.

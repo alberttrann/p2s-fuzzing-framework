@@ -1,0 +1,63 @@
+# Framework-native Track-B config for blog.
+# RESTgym keeps its historical semantically-active mitmproxy on host :9090.
+# The retained workload fixture emits P2S primitive-trace JSONL; `p2s record`
+# freezes that trace, then the shared v1.2 compiler/fuzzer/reset lifecycle is used.
+[target]
+name = "blog"
+base_url = "http://localhost:9090"
+openapi_spec = "apis/blog/specifications/blog.yaml"
+state_adapter = "command"
+executor_adapter = "ocli"
+context_path_prefix = ""
+golden_out = "blog_p2s_golden_dataset.jsonl"
+silver_out = "blog_p2s_silver_dataset.jsonl"
+checkpoint_file = "blog_p2s_processed_flows.txt"
+
+[command_state]
+working_directory = "."
+restore_sleep_seconds = 2.0
+restore_snapshot_command = '''docker exec -i restgym_blog mysql -ublog -pblog blogapi < apis/blog/database/blogapi.sql'''
+
+[llm]
+backend = "openai_compat"
+base_url = "http://localhost:8081/v1"
+model = "qwen35-9b-p2s"
+api_key = "no-key"
+max_attempts = 6
+
+[ocli]
+profile_name = "p2s12_blog"
+api_base_url = "http://localhost:9090"
+openapi_spec = "apis/blog/specifications/blog.yaml"
+command_prefix = ""
+throttle_delay_seconds = 0.015
+timeout_seconds = 150
+
+# Optional diagnostic P2S proxy. It is NOT used by the retained Track-B workload;
+# starting it on 9190 preserves RESTgym mitmproxy at the historical host :9090.
+[proxy]
+listen_port = 9190
+target_host = "http://localhost:9090"
+flow_strategy = "header"
+output_file = "primitive_traces.jsonl"
+
+[research]
+root_dir = "$RESTGYM_ROOT"
+prepare_commands = [
+  "docker rm -f restgym_blog 2>/dev/null || true",
+  "docker build -t restgym/blog:latest -f apis/blog/Dockerfile .",
+  "MSYS_NO_PATHCONV=1 docker run -d --name restgym_blog -p 9090:9090 -p 12345:12345 -e API=blog -e TOOL=manual -e RUN=1 restgym/blog:latest",
+  "sleep 15"
+]
+record_command = "python record_blog_full_52.py"
+record_trace_source = "p2s_traces/blog/primitive_traces.jsonl"
+record_snapshot_file = "baseline_primitive_traces.jsonl"
+time_budget_seconds = 3600
+cyclic = true
+clear_checkpoint_for_cyclic = true
+reset_before_each_target = true
+pre_step_replay = "none"
+require_attack_flag_for_2xx = true
+patch_openapi_required = true
+runtime_openapi_file = "blog_runtime_relaxed.json"
+cleanup_commands = ["docker rm -f restgym_blog 2>/dev/null || true"]

@@ -1,0 +1,67 @@
+# Framework-native preparation of the shared SEAL target used by AutoRestTest,
+# CATS, and Schemathesis. The baseline tools remain their original external tools.
+[target]
+name = "seal_track_a_baselines"
+base_url = "http://localhost:8080/api"
+openapi_spec = "seal_baseline_openapi.json"
+state_adapter = "stateless"
+executor_adapter = "ocli"
+
+[llm]
+backend = "openai_compat"
+base_url = "http://localhost:8081/v1"
+model = "unused"
+api_key = "no-key"
+
+[ocli]
+profile_name = "seal_baseline_prep_p2s12"
+api_base_url = "http://localhost:8080/api"
+openapi_spec = "seal_baseline_openapi.json"
+bearer_token_file = ".p2s/seal_baseline_coordinator_token.txt"
+
+[proxy]
+listen_port = 8090
+target_host = "http://localhost:8080"
+flow_strategy = "header"
+output_file = "baseline_unused_traces.jsonl"
+mask_sensitive_headers = true
+
+[openapi_setup]
+source_url = "http://localhost:8080/api/v3/api-docs"
+output_file = "seal_baseline_openapi.json"
+server_url = "http://localhost:8080/api"
+remove_paths = ["/auth/logout"]
+remove_operations = ["DELETE /users/{id}", "DELETE /users/me"]
+
+[auth]
+mode = "bearer_login"
+login_url = "http://localhost:8080/api/auth/login"
+login_body = { email = "coordinator@seal.eval", password = "Eval@1234567" }
+token_json_field = "accessToken"
+token_output_file = ".p2s/seal_baseline_coordinator_token.txt"
+pre_login_commands = [
+  "psql postgresql://postgres:postgres@localhost:5432/seal_hackathon -c 'TRUNCATE revoked_tokens;'"
+]
+
+[research]
+root_dir = "$SEAL_ROOT"
+readiness_url = "http://localhost:8080/api/v3/api-docs"
+readiness_timeout_seconds = 60
+patch_openapi_required = false
+
+# Historical five-hour baseline parity: 525,600-minute JWT lifetime.
+[[patches]]
+kind = "regex_replace"
+path = "src/main/java/vn/edu/fpt/seal/config/AppProperties.java"
+find = '''private\s+int\s+accessTokenExpirationMinutes\s*=\s*\d+\s*;[^\n]*'''
+replace = "private int accessTokenExpirationMinutes = 525600; // P2S Track-A baseline: 1 year"
+required = true
+count = 1
+
+[[patches]]
+kind = "regex_replace"
+path = "src/main/java/vn/edu/fpt/seal/security/JwtService.java"
+find = '''Instant\s+exp\s*=\s*now\.plus\([^;]+ChronoUnit\.MINUTES\s*\);[^\n]*'''
+replace = "Instant exp = now.plus(525600, ChronoUnit.MINUTES); // P2S Track-A baseline: 1 year"
+required = true
+count = 1

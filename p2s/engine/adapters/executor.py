@@ -27,11 +27,19 @@ class OcliExecutorAdapter(BaseExecutorAdapter):
                  target_url: str = "http://localhost:8080/api",
                  throttle_delay: float = 0.015,
                  timeout: int = 150,
-                 catalog_path: str = "ocli_catalog.json"):
+                 catalog_path: str = "ocli_catalog.json",
+                 openapi_spec: str = "",
+                 bearer_token: str = "",
+                 basic_auth: str = "",
+                 command_prefix: str = ""):
         self.profile_name = profile_name
-        self.target_url = target_url
+        self.target_url = target_url.rstrip("/")
         self.throttle_delay = throttle_delay
         self.timeout = timeout
+        self.openapi_spec = openapi_spec or f"{self.target_url}/v3/api-docs"
+        self.profile_bearer_token = bearer_token or ""
+        self.basic_auth = basic_auth or ""
+        self.command_prefix = command_prefix or ""
 
         # Load object query parameter names for formatting
         self.object_query_params = set()
@@ -71,13 +79,17 @@ class OcliExecutorAdapter(BaseExecutorAdapter):
                 found = re.findall(r'\[(.*?)\]', f.read())
         if self.profile_name not in found:
             print(f"[*] Auto-registering OCLI profile '{self.profile_name}'...")
-            cmd = (
-                f'ocli profiles add {self.profile_name} '
-                f'--api-base-url {self.target_url} '
-                f'--openapi-spec {self.target_url}/v3/api-docs '
-                f'--api-bearer-token "" --command-prefix ""'
-            )
-            subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL)
+            args = [
+                "ocli", "profiles", "add", self.profile_name,
+                "--api-base-url", self.target_url,
+                "--openapi-spec", self.openapi_spec,
+            ]
+            if self.basic_auth:
+                args += ["--api-basic-auth", self.basic_auth]
+            else:
+                args += ["--api-bearer-token", self.profile_bearer_token]
+            args += ["--command-prefix", self.command_prefix]
+            subprocess.run(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             subprocess.run(f"ocli use {self.profile_name}", shell=True, stdout=subprocess.DEVNULL)
 
     def get_help(self, command_name: str, openapi_path: str = None, method: str = None) -> str:
@@ -187,8 +199,9 @@ class OcliExecutorAdapter(BaseExecutorAdapter):
         cmd_str = re.sub(r'\s+-p\s+(?:"[^"]*"|\'[^\']*\'|[^\s]+)', '', cmd_str)
         cmd_str = cmd_str.strip()
 
-        if bearer_token and "--api-bearer-token" not in cmd_str:
-            cmd_str += f" --api-bearer-token {shlex.quote(bearer_token)}"
+        effective_bearer = bearer_token or self.profile_bearer_token
+        if effective_bearer and "--api-bearer-token" not in cmd_str:
+            cmd_str += f" --api-bearer-token {shlex.quote(effective_bearer)}"
         if "--profile" not in cmd_str and "ocli " in cmd_str:
             cmd_str += f" --profile {self.profile_name}"
 

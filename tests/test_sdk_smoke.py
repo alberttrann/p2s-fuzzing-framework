@@ -5,7 +5,7 @@ from p2s import P2S
 
 
 def test_public_api():
-    assert p2s.__version__ == "1.1.0"
+    assert p2s.__version__ == "1.2.0"
     assert P2S is p2s.P2SClient
 
 

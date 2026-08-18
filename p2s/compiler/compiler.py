@@ -3,14 +3,59 @@ import re
 import shlex
 import urllib.parse
 import os
+from pathlib import Path
 
 class P2SCompiler:
     def __init__(self, swagger_path: str, context_path_prefix: str = "/api"):
         self.context_path_prefix = context_path_prefix
-        with open(swagger_path, "r", encoding="utf-8") as f:
-            self.spec = json.load(f)
+        self.spec = self._load_spec(swagger_path)
         self.routes = self._build_router()
         self.catalog = {}
+
+    @staticmethod
+    def _load_spec(swagger_path: str) -> dict:
+        """Load OpenAPI/Swagger from JSON or YAML.
+
+        RESTgym mixes JSON and YAML specifications, so framework-native Track-B
+        reproduction must not depend on a target-specific compiler just to parse
+        the contract format.
+        """
+        text = Path(swagger_path).read_text(encoding="utf-8")
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            try:
+                import yaml
+            except ImportError as exc:  # pragma: no cover
+                raise RuntimeError(
+                    "YAML OpenAPI input requires PyYAML; install p2s-framework>=1.2"
+                ) from exc
+            data = yaml.safe_load(text)
+            if not isinstance(data, dict):
+                raise ValueError(f"OpenAPI document is not an object: {swagger_path}")
+            return data
+
+    def _resolve_schema(self, schema: dict) -> dict:
+        if not isinstance(schema, dict):
+            return {}
+        ref = schema.get("$ref", "")
+        if ref.startswith("#/components/schemas/"):
+            return self.spec.get("components", {}).get("schemas", {}).get(ref.rsplit("/", 1)[-1], {})
+        if ref.startswith("#/definitions/"):
+            return self.spec.get("definitions", {}).get(ref.rsplit("/", 1)[-1], {})
+        return schema
+
+    def _request_body_schema(self, details: dict) -> tuple[dict, str]:
+        request_body = details.get("requestBody", {}) or {}
+        content = request_body.get("content", {}) if isinstance(request_body, dict) else {}
+        for media in ("application/json", "application/x-www-form-urlencoded", "multipart/form-data"):
+            if media in content:
+                return self._resolve_schema(content[media].get("schema", {}) or {}), media
+        # Swagger/OpenAPI 2 body parameter fallback.
+        for param in details.get("parameters", []) or []:
+            if param.get("in") == "body":
+                return self._resolve_schema(param.get("schema", {}) or {}), "application/json"
+        return {}, ""
 
     def _resolve_schema_type(self, schema: dict) -> str:
         """Follows single-level $ref to resolve actual types (e.g. Pageable → object)."""
@@ -50,14 +95,14 @@ class P2SCompiler:
                 "type": self._resolve_schema_type(p.get("schema", {})),
                 "description": p.get("description", "")
             }
-        req_body = details.get("requestBody", {})
-        if req_body:
-            schema = req_body.get("content", {}).get("application/json", {}).get("schema", {})
+        schema, media_type = self._request_body_schema(details)
+        if schema:
             for pname, pschema in schema.get("properties", {}).items():
                 flags[pname] = {
                     "in": "body", "required": pname in schema.get("required", []),
-                    "type": pschema.get("type", "string"),
-                    "description": pschema.get("description", "")
+                    "type": self._resolve_schema_type(pschema),
+                    "description": pschema.get("description", ""),
+                    "media_type": media_type,
                 }
         self.catalog[cmd_name] = {
             "openapi_path": openapi_path, "method": method,
@@ -106,28 +151,21 @@ class P2SCompiler:
                         flags.append(f"--{k} {shlex.quote(str(v))}")
 
                     body = req.get("body")
-                    if body and isinstance(body, dict):
-                        has_defined_props = False
-                        req_body_spec = matched["details"].get("requestBody", {})
-                        if req_body_spec:
-                            schema_ref = req_body_spec.get("content", {}).get(
-                                "application/json", {}
-                            ).get("schema", {}).get("$ref", "")
-                            if schema_ref:
-                                schema_name = schema_ref.split("/")[-1]
-                                if self.spec.get("components", {}).get(
-                                    "schemas", {}
-                                ).get(schema_name, {}).get("properties"):
-                                    has_defined_props = True
-
+                    body_schema, media_type = self._request_body_schema(matched["details"])
+                    if isinstance(body, str) and media_type == "application/x-www-form-urlencoded":
+                        body = dict(urllib.parse.parse_qsl(body, keep_blank_values=True))
+                    if body is not None and isinstance(body, dict):
+                        has_defined_props = bool(body_schema.get("properties"))
                         if has_defined_props:
                             for k, v in body.items():
                                 val_str = json.dumps(v) if isinstance(v, (dict, list, bool)) \
                                           or v is None else str(v)
                                 flags.append(f"--{k} {shlex.quote(val_str)}")
                         else:
-                            # AITasker Fallback: Wrap raw opaque object in --body
+                            # Sparse/opaque schema fallback retained from the source experiment.
                             flags.append(f"--body {shlex.quote(json.dumps(body))}")
+                    elif body not in (None, ""):
+                        flags.append(f"--body {shlex.quote(str(body))}")
 
                     for k, v in req.get("headers", {}).items():
                         if k.lower() == "authorization" and str(v).lower().startswith("bearer "):

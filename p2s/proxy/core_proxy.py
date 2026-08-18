@@ -110,9 +110,13 @@ class P2SProxyHandler(BaseHTTPRequestHandler):
 
         masked_headers = {}
         for k, v in req_headers.items():
-            if k.lower() in ("authorization", "x-sepay-signature", "cookie"):
+            if k.lower() == "x-flow-id":
+                continue
+            if self.server.mask_sensitive_headers and k.lower() in (
+                "authorization", "x-sepay-signature", "cookie"
+            ):
                 masked_headers[k] = f"<{k.upper()}_MASKED>"
-            elif k.lower() != "x-flow-id":
+            else:
                 masked_headers[k] = v
 
         trace_step = {
@@ -131,9 +135,11 @@ class P2SProxyHandler(BaseHTTPRequestHandler):
         print(f"[PROXY] ✓ {flow_id} | step {step:>3} | {method:6} {path[:60]} → {status_code}")
 
 class P2SProxyServer(ThreadingHTTPServer):
-    def __init__(self, server_address, RequestHandlerClass, target_host, strategy, output_file):
+    def __init__(self, server_address, RequestHandlerClass, target_host, strategy, output_file,
+                 *, mask_sensitive_headers: bool = True):
         super().__init__(server_address, RequestHandlerClass)
         self.target_host = target_host.rstrip("/")
         self.strategy = strategy
         self.output_file = output_file
+        self.mask_sensitive_headers = bool(mask_sensitive_headers)
         self.file_lock = threading.Lock()

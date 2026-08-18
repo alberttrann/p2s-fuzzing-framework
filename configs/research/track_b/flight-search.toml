@@ -1,0 +1,77 @@
+# Framework-native Track-B config for flight-search.
+# RESTgym keeps its historical semantically-active mitmproxy on host :9090.
+# The retained workload fixture emits P2S primitive-trace JSONL; `p2s record`
+# freezes that trace, then the shared v1.2 compiler/fuzzer/reset lifecycle is used.
+[target]
+name = "flight_search"
+base_url = "http://localhost:9090"
+openapi_spec = "p2s_specs/flightsearch.yaml"
+state_adapter = "command"
+executor_adapter = "ocli"
+context_path_prefix = ""
+golden_out = "flight_search_p2s_golden_dataset.jsonl"
+silver_out = "flight_search_p2s_silver_dataset.jsonl"
+checkpoint_file = "flight_search_p2s_processed_flows.txt"
+
+[command_state]
+working_directory = "."
+restore_sleep_seconds = 2.0
+restore_snapshot_command = '''docker exec restgym_flightsearch mongosh flightdatabase --eval 'db.dropDatabase();' && docker exec restgym_flightsearch mongosh flightdatabase /api/database/init-mongo.js'''
+
+[llm]
+backend = "openai_compat"
+base_url = "http://localhost:8081/v1"
+model = "qwen35-9b-p2s"
+api_key = "no-key"
+max_attempts = 6
+
+[ocli]
+profile_name = "p2s12_flight_search"
+api_base_url = "http://localhost:9090"
+openapi_spec = "p2s_specs/flightsearch.yaml"
+command_prefix = ""
+throttle_delay_seconds = 0.015
+timeout_seconds = 150
+
+# Optional diagnostic P2S proxy. It is NOT used by the retained Track-B workload;
+# starting it on 9190 preserves RESTgym mitmproxy at the historical host :9090.
+[proxy]
+listen_port = 9190
+target_host = "http://localhost:9090"
+flow_strategy = "header"
+output_file = "primitive_traces.jsonl"
+
+[research]
+root_dir = "$RESTGYM_ROOT"
+prepare_commands = [
+  "docker rm -f restgym_flightsearch 2>/dev/null || true",
+  "docker build -t restgym/flightsearch:latest -f apis/flight-search/Dockerfile .",
+  "MSYS_NO_PATHCONV=1 docker run -d --name restgym_flightsearch -p 9090:9090 -p 12345:12345 -e API=flight-search -e TOOL=manual -e RUN=1 restgym/flightsearch:latest",
+  "sleep 35",
+  "mkdir -p p2s_specs && MSYS_NO_PATHCONV=1 docker cp restgym_flightsearch:/api/specifications/flight-search.yaml p2s_specs/flightsearch.yaml"
+]
+record_command = "python record_flightsearch_full_40.py"
+record_trace_source = "p2s_traces/flight-search/primitive_traces.jsonl"
+record_snapshot_file = "baseline_primitive_traces.jsonl"
+time_budget_seconds = 3600
+cyclic = true
+clear_checkpoint_for_cyclic = true
+reset_before_each_target = true
+pre_step_replay = "none"
+require_attack_flag_for_2xx = true
+patch_openapi_required = true
+runtime_openapi_file = "flight_search_runtime_relaxed.json"
+cleanup_commands = ["docker rm -f restgym_flightsearch 2>/dev/null || true"]
+
+[[patches]]
+kind = "replace"
+path = "apis/flight-search/auth.py"
+find = '"userType": "USER"'
+replace = '"userType": "ADMIN"'
+
+[[patches]]
+kind = "replace"
+path = "apis/flight-search/auth.py"
+find = "test@example.com"
+replace = "admin@example.com"
+required = false

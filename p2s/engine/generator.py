@@ -36,7 +36,12 @@ class P2SDataGenerator:
         if m: return m.group(0)
         return indicator_str[:200].strip()
 
-    def generate_corpus(self, traces_file: str, max_attempts: int = 6):
+    def generate_corpus(self, traces_file: str, max_attempts: int = 6, *,
+                        reset_before_each_flow: bool = False,
+                        pre_step_replay: str = "last"):
+        replay_mode = (pre_step_replay or "last").lower()
+        if replay_mode not in {"last", "all", "none"}:
+            raise ValueError("pre_step_replay must be one of: last, all, none")
         flows = {}
         with open(traces_file, 'r', encoding='utf-8') as f:
             for line in f:
@@ -62,10 +67,16 @@ class P2SDataGenerator:
                 pre_steps = steps[:t_idx]
 
                 if not pre_steps:
+                    if reset_before_each_flow:
+                        self.state.reset_baseline()
                     self.state.create_snapshot()
                 else:
                     self.state.restore_snapshot()
-                    self.executor.execute(pre_steps[-1].get("ocli_command", ""))
+                    if replay_mode == "all":
+                        for pre in pre_steps:
+                            self.executor.execute(pre.get("ocli_command", ""))
+                    elif replay_mode == "last":
+                        self.executor.execute(pre_steps[-1].get("ocli_command", ""))
                     self.state.create_snapshot()
 
                 history_str = "\n".join([

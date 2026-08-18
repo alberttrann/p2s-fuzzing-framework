@@ -22,3 +22,7 @@ p2s_run_metadata.json
 .idea/
 .DS_Store
 Thumbs.db
+
+# Python packaging outputs
+#build/
+#dist/

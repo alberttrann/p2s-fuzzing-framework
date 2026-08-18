@@ -1,0 +1,59 @@
+# Framework-native reproduction of Operation 1: AITasker self-play corpus generation.
+# Set AITASKER_ROOT to the checked-out AITasker repository (feat/hung/SWT-Main).
+[target]
+name = "aitasker_training"
+base_url = "http://localhost:3001"
+openapi_spec = "backend/swagger.json"
+state_adapter = "postgres"
+executor_adapter = "ocli"
+context_path_prefix = ""
+golden_out = "golden_dataset.jsonl"
+silver_out = "silver_dataset.jsonl"
+checkpoint_file = "processed_flows.txt"
+
+[postgres]
+active_db = "aitasker_active"
+template_db = "aitasker_snap"
+admin_url = "postgresql://postgres:postgres@localhost:5434/postgres"
+recreate_active_before_seed = true
+seed_command = "cd backend && DATABASE_URL=postgresql://postgres:postgres@localhost:5434/aitasker_active?schema=public npx prisma db push --accept-data-loss && npx prisma db execute --file=prisma/migrations/010_seed.sql --url=postgresql://postgres:postgres@localhost:5434/aitasker_active?schema=public"
+
+[llm]
+backend = "openai_compat"
+base_url = "http://localhost:1234/v1"
+model = "qwen3.5-9b-base"
+api_key = "lm-studio"
+max_attempts = 6
+
+[ocli]
+profile_name = "aitasker_p2s12"
+api_base_url = "http://localhost:3001"
+openapi_spec = "backend/swagger.json"
+command_prefix = ""
+throttle_delay_seconds = 0.015
+timeout_seconds = 15
+
+[proxy]
+listen_port = 8090
+target_host = "http://localhost:3001"
+flow_strategy = "endpoint"
+reset_endpoint = "/auth/register"
+output_file = "primitive_traces.jsonl"
+# Historical source-corpus capture retained disposable test bearer headers.
+# Keep raw traces private and sanitize before publication.
+mask_sensitive_headers = false
+
+[openapi_setup]
+source_url = "http://localhost:3001/api-json"
+output_file = "backend/swagger.json"
+
+[research]
+root_dir = "$AITASKER_ROOT"
+readiness_url = "http://localhost:3001/api-json"
+readiness_timeout_seconds = 60
+prepare_commands = []
+record_command = "cd backend/simulations/mainflow-validation && BASE_URL=http://localhost:8090 bash run_all_mf.sh"
+record_snapshot_file = "baseline_primitive_traces.jsonl"
+patch_openapi_required = false
+reset_before_each_flow = true
+pre_step_replay = "last"

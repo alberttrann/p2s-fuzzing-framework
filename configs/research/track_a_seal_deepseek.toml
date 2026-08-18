@@ -1,0 +1,75 @@
+# Framework-native Track-A P2S evaluation on SEAL/HackathonBench.
+# Set SEAL_ROOT to the checkout of branch be-10/07.
+[target]
+name = "seal_hackathon"
+base_url = "http://localhost:8080/api"
+openapi_spec = "seal_openapi.json"
+state_adapter = "postgres"
+executor_adapter = "ocli"
+context_path_prefix = "/api"
+golden_out = "deepseek_golden_dataset.jsonl"
+silver_out = "deepseek_silver_dataset.jsonl"
+checkpoint_file = "deepseek_processed_flows.txt"
+
+[postgres]
+active_db = "seal_hackathon"
+template_db = "seal_hackathon_snap"
+admin_url = "postgresql://postgres:postgres@localhost:5432/postgres"
+recreate_active_before_seed = true
+seed_command = "psql postgresql://postgres:postgres@localhost:5432/seal_hackathon -f seal_hackathon_full_2026-07-04.sql -f migration_gapfill.sql -f migration_gapfill2.sql -f migration_gapfill3.sql"
+post_seed_commands = [
+  '''curl -s -X POST http://localhost:8080/api/auth/register -H 'Content-Type: application/json' -d '{"email":"coordinator@seal.eval","password":"Eval@1234567","fullName":"P2S Eval Coordinator"}' >/dev/null || true; sleep 1''',
+  '''psql postgresql://postgres:postgres@localhost:5432/seal_hackathon -v ON_ERROR_STOP=1 -c "DELETE FROM user_roles WHERE user_id=(SELECT id FROM users WHERE email='coordinator@seal.eval'); UPDATE users SET id='f6aedc49-ab54-4ed2-9668-abc9eb337e34',status='approved' WHERE email='coordinator@seal.eval'; INSERT INTO user_roles (user_id,role_id) SELECT 'f6aedc49-ab54-4ed2-9668-abc9eb337e34',id FROM roles WHERE name IN ('team_member','coordinator') ON CONFLICT DO NOTHING;"'''
+]
+
+[llm]
+backend = "openai_compat"
+base_url = "https://api.deepseek.com"
+model = "deepseek-v4-flash"
+api_key = ""
+api_key_env = "DEEPSEEK_API_KEY"
+max_attempts = 6
+
+[ocli]
+profile_name = "seal_p2s12_deepseek"
+api_base_url = "http://localhost:8080/api"
+openapi_spec = "seal_openapi.json"
+bearer_token_file = ".p2s/seal_coordinator_token.txt"
+command_prefix = ""
+throttle_delay_seconds = 0.015
+timeout_seconds = 150
+
+[proxy]
+listen_port = 8090
+target_host = "http://localhost:8080"
+flow_strategy = "header"
+output_file = "primitive_traces.jsonl"
+
+[openapi_setup]
+source_url = "http://localhost:8080/api/v3/api-docs"
+output_file = "seal_openapi.json"
+server_url = "http://localhost:8080/api"
+
+[auth]
+mode = "bearer_login"
+login_url = "http://localhost:8080/api/auth/login"
+login_body = { email = "coordinator@seal.eval", password = "Eval@1234567" }
+token_json_field = "accessToken"
+token_output_file = ".p2s/seal_coordinator_token.txt"
+pre_login_commands = [
+  '''curl -s -X POST http://localhost:8080/api/auth/register -H 'Content-Type: application/json' -d '{"email":"coordinator@seal.eval","password":"Eval@1234567","fullName":"P2S Eval Coordinator"}' >/dev/null || true; sleep 1''',
+  '''psql postgresql://postgres:postgres@localhost:5432/seal_hackathon -c "DELETE FROM user_roles WHERE user_id=(SELECT id FROM users WHERE email='coordinator@seal.eval'); UPDATE users SET id='f6aedc49-ab54-4ed2-9668-abc9eb337e34',status='approved' WHERE email='coordinator@seal.eval'; INSERT INTO user_roles (user_id,role_id) SELECT 'f6aedc49-ab54-4ed2-9668-abc9eb337e34',id FROM roles WHERE name IN ('team_member','coordinator') ON CONFLICT DO NOTHING; TRUNCATE revoked_tokens;"'''
+]
+
+[research]
+root_dir = "$SEAL_ROOT"
+readiness_url = "http://localhost:8080/api/v3/api-docs"
+readiness_timeout_seconds = 60
+prepare_commands = []
+record_command = "BASE_URL=http://localhost:8090/api bash seal-simulations/seal-flows/seal_flows.sh"
+record_snapshot_file = "baseline_primitive_traces.jsonl"
+patch_openapi_required = true
+runtime_openapi_file = "seal_runtime_relaxed.json"
+reset_before_each_flow = true
+pre_step_replay = "last"
+reset_before_each_target = false
