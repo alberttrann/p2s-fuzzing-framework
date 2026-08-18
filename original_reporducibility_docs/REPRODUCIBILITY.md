@@ -1,11 +1,11 @@
 # P2S Research Reproducibility & Expansion Guide
 
-**Companion documentation for P2S Framework v1.1.0**  
+**Companion documentation for P2S Framework v1.2.0**  
 **Research project:** *P2S: Primitive-to-Semantics Training for Execution-Verified API Security Fuzzing via Self-Play and Specialist LLM Adaptation*
 
 This document consolidates the experiment procedures that were originally spread across several development notes and target-specific scripts. Its purpose is to make the complete research pipeline reproducible without pretending that every historical experiment used one byte-identical proxy, compiler, or runner.
 
-P2S was developed iteratively. AITasker training-data generation, SEAL Track A, and the eleven RESTgym Track B services each exposed target-specific requirements: different authentication, context paths, database reset mechanisms, proxy flow-boundary rules, and execution budgets. **P2S Framework v1.1.0 is the normalized reusable layer extracted from those experiments.** Target-specific setup remains configuration, hooks, or research-harness code rather than being baked into the core engine.
+P2S was developed iteratively. AITasker training-data generation, SEAL Track A, and the eleven RESTgym Track B services each exposed target-specific requirements: different authentication, context paths, database reset mechanisms, proxy flow-boundary rules, and execution budgets. **P2S Framework v1.2.0 is the normalized reusable layer extracted from those experiments.** Target-specific setup remains configuration, hooks, or research-harness code rather than being baked into the core engine.
 
 The repository root also includes `p2s_colab_train.ipynb` as a **training-reproduction example**. It is intentionally outside the `p2s/` package: the SDK produces `final_training_dataset.jsonl`; the notebook is one downstream consumer that reproduces the paper's Qwen3.5-9B specialization on Colab/A100. Installing the wheel does not install or require the notebook's Unsloth/TRL stack.
 
@@ -42,7 +42,7 @@ The archived experiment notes contain several stale values left over from earlie
 
 1. **Final paper / retained run artifacts** for reported experimental settings and numbers.
 2. **Target repository branch and retained scripts/artifacts** for exact experiment execution.
-3. **P2S Framework v1.1.0** for the normalized reusable proxy/compiler/engine/dataset/analytics behavior.
+3. **P2S Framework v1.2.0** for the normalized reusable proxy/compiler/engine/dataset/analytics behavior.
 4. Old scratch commands only when they agree with the above.
 
 ### 2.1 Important archival discrepancies
@@ -105,7 +105,7 @@ pip install -e .
 
 The experiments used target-local script names before the framework was packaged. The public SDK maps them as follows:
 
-| Historical file / operation | P2S v1.1.0 replacement |
+| Historical file / operation | P2S v1.2.0 replacement |
 |---|---|
 | `proxy.py` | `p2s.proxy.core_proxy` / `p2s proxy` |
 | `trace_compiler.py` | `p2s.compiler.compiler.TraceCompiler` / `p2s compile` / `P2S.compile()` |
@@ -119,7 +119,7 @@ The experiments used target-local script names before the framework was packaged
 
 ### 4.1 Why some target-specific runners still exist
 
-The public v1.1.0 SDK normalizes the reusable mechanisms, but **the exact Track B experiment has a 3,600-second cyclic wall-clock protocol and per-service reset operations**. Those service-specific resets include SQL reseeding, contract redeployment, MongoDB reseeding, Kafka topic deletion, and container restart. For exact paper parity, preserve the Track B research runner in the RESTgym artifact and use the framework underneath it rather than pretending a single generic TOML can express every one of those operations in v1.1.0.
+The public v1.2.0 SDK normalizes the reusable mechanisms, but **the exact Track B experiment has a 3,600-second cyclic wall-clock protocol and per-service reset operations**. Those service-specific resets include SQL reseeding, contract redeployment, MongoDB reseeding, Kafka topic deletion, and container restart. For exact paper parity, preserve the Track B research runner in the RESTgym artifact and use the framework underneath it rather than pretending a single generic TOML can express every one of those operations in v1.2.0.
 
 This is an extension point, not a contradiction: P2S's core generation/execution logic remains the same while state restoration is target-specific.
 
@@ -975,6 +975,8 @@ The dedicated guide documents every known supersession: most importantly the Aut
 
 # Part VII — Operation 5: Track B on the 11 SBFT RESTgym Services
 
+The release includes `docs/track_b_service_record_files/` for all the primitive-trace-production files that were used in P2S research experiment
+
 ## 34. Clone and Initialize RESTgym
 
 ```bash
@@ -1061,7 +1063,7 @@ python reclassify_vectors.py <service>_p2s both
 
 ### Framework relationship
 
-`trace_compiler.py` and `eval_student_p2s_engine.py` in the Track B artifact are target/research wrappers around the same responsibilities now public as `p2s.compiler` and `p2s.engine`. Keep them in the Track B release because v1.1.0 does not yet encode the paper's per-service reset commands and hard 3,600-second cyclic budget as generic TOML fields.
+`trace_compiler.py` and `eval_student_p2s_engine.py` in the Track B artifact are target/research wrappers around the same responsibilities now public as `p2s.compiler` and `p2s.engine`. Keep them in the Track B release because v1.2.0 does not yet encode the paper's per-service reset commands and hard 3,600-second cyclic budget as generic TOML fields.
 
 ---
 
@@ -2108,7 +2110,7 @@ That separation is the practical meaning of P2S being expandable across unrelate
 
 ```text
                                       ┌──────────────────────────┐
-                                      │  P2S Framework v1.1.0   │
+                                      │  P2S Framework v1.2.0   │
                                       │ proxy/compiler/engine    │
                                       └────────────┬─────────────┘
                                                    │

@@ -2,6 +2,8 @@
 
 This reviewer-facing document preserves the service-specific RESTgym environment contract needed for the Track-B experiments. Configuration patches, authentication/proxy behavior, context paths, launch parameters, and reset adapters are treated as **normative experimental configuration**, not optional troubleshooting notes.
 
+The release includes `docs/track_b_service_record_files/` for all the primitive-trace-production files that were used in P2S research experiment
+
 # Part VII — Operation 5: Track B on the 11 SBFT RESTgym Services
 
 ## 34. Clone and Initialize RESTgym
