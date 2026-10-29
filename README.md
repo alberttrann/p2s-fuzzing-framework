@@ -1321,8 +1321,23 @@ P2S is intended for security testing of systems you own, local research benchmar
 
 ---
 
+# Citation
+
+The associated work is:
+
+**Tran Vo Minh Hung. _P2S: Primitive-to-Semantics for Stateful REST API Security Testing Beyond Code Coverage._ EAI FISAT 2026.**
+
+Add the proceedings DOI/BibTeX here when the final publisher record becomes available.
+
+---
+
 # Release
 
-**P2S Framework v1.2.0** is the framework-native research-reproduction release.
+Current public SDK release:
 
-Its main architectural change is that AITasker, SEAL Track A, and RESTgym Track B now share the same public P2S implementation; target-specific patches, authentication, state restoration, workload handling, and lifecycle steps are represented declaratively in research TOML profiles. Historical one-off implementations are retained separately for audit fidelity rather than used as the default user path.
+```text
+P2S Framework v1.2.0
+```
+
+Framework: https://github.com/alberttrann/p2s-fuzzing-framework  
+Artifacts: https://huggingface.co/datasets/minhhungg/p2s-research-artifacts
