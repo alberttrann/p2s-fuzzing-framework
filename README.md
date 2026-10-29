@@ -7,13 +7,73 @@
 ![Research](https://img.shields.io/badge/artifact-reproducible-purple)
 ![OpenAPI](https://img.shields.io/badge/interface-OpenAPI%20%2B%20OCLI-orange)
 
-**P2S (Primitive-to-Semantics)** is an execution-grounded framework for stateful REST API security testing. It captures successful multi-step API traces, grounds them against an OpenAPI specification, converts them into executable OCLI primitives, reconstructs the prerequisite business state before each target request, and asks an LLM to generate fault-seeking mutations. Those mutations are executed against a resettable backend, so the **live system response—not another model—is the external execution signal** used for self-play data generation and evaluation.
+**P2S (Primitive-to-Semantics)** is an execution-grounded framework for **stateful REST API security testing**. It captures successful multi-step API traces, grounds them against OpenAPI, converts them into executable OCLI primitives, reconstructs the prerequisite state before each target request, and asks an LLM to generate state-conditioned fault-seeking mutations.
 
-The project focuses on security behaviors whose meaning depends on **identity, ownership, lifecycle state, prior requests, and business-flow history**. A request can be syntactically valid and reach the same code path as a legitimate request while still violating a security invariant—for example, modifying another user's resource, progressing an object before prerequisites are met, or exercising a privileged transition in the wrong state.
+The backend response is the **external execution signal**. P2S deliberately keeps that concept separate from semantic verification: an HTTP 500 is evidence of a server fault, not automatically a vulnerability, and a successful 2xx security-intent candidate requires independent semantic adjudication before it is reported as a verified security bypass.
 
-This repository contains **P2S Framework v1.2.0**, the unified public Python SDK extracted from the research implementation. The original experiments evolved through several one-off proxy/compiler/evaluator scripts; v1.2 moves those differences into declarative research profiles so the maintained reproduction path uses one shared implementation.
+This repository contains the reusable **P2S Framework v1.2.0** and the framework-native reproduction profiles used to reproduce the research workflow with one maintained implementation.
 
-> **Public validation source.** The manuscript is still under anonymous review and is therefore not published in this repository. This README intentionally carries the project motivation, experimental design, headline results, limitations, model information, and reproduction entry points needed to validate the work publicly. The manuscript uses anonymized names **SourceMarket** and **HackathonBench**; the public artifacts correspond to **AITasker** and the **SEAL Hackathon backend**.
+---
+
+## Research release
+
+**Paper:** *P2S: Primitive-to-Semantics for Stateful REST API Security Testing Beyond Code Coverage*  
+**Author:** Tran Vo Minh Hung  
+**Affiliation:** FPT University  
+**Venue:** EAI FISAT 2026
+
+The paper, implementation, source applications, model artifacts, and experimental evidence are now de-anonymized and cross-linked below for reproduction and inspection.
+
+### Public research resources
+
+| Resource | Purpose |
+|---|---|
+| **P2S Framework / SDK** | https://github.com/alberttrann/p2s-fuzzing-framework |
+| **P2S research artifacts** | https://huggingface.co/datasets/minhhungg/p2s-research-artifacts |
+| **AITasker source** | https://github.com/alberttrann/AITasker/tree/feat/Hung/SWT-Main |
+| **SEAL Spring Boot evaluation target** | https://github.com/triet2809/SWP391_SealHackathon_BackEnd/tree/be-10/07/src/main/java/vn/edu/fpt/seal |
+| **P2S LoRA adapter** | https://huggingface.co/minhhungg/qwen35-9b-p2s-lora |
+| **P2S merged 4-bit model** | https://huggingface.co/minhhungg/qwen35-9b-p2s-merged-4bit |
+| **P2S merged 16-bit model** | https://huggingface.co/minhhungg/qwen35-9b-p2s-merged-16bit |
+| **P2S GGUF / reported Q8_0 evaluation artifact** | https://huggingface.co/minhhungg/p2s_gguf |
+
+### How the public resources fit together
+
+```text
+AITasker
+  │
+  │ valid multi-step business flows
+  ▼
+P2S trace capture + OpenAPI/OCLI compilation
+  │
+  ▼
+execution-grounded Golden/Silver generation
+  │
+  ├── 1,917 raw Silver
+  │      └── 1,782 after deduplication
+  │
+  └── 44 unique candidate-Golden
+         └── 484 Golden training instances after balancing
+  │
+  ▼
+2,266-example SFT corpus
+  │
+  ▼
+Qwen3.5-9B LoRA specialization
+  │
+  ├── LoRA adapter
+  ├── merged 4-bit checkpoint
+  ├── merged 16-bit checkpoint
+  └── GGUF F16 / Q8_0
+          │
+          ▼
+Track A: independent SEAL Spring Boot backend
+Track B: 11 RESTgym / SBFT services
+```
+
+The Hugging Face artifact repository preserves the experimental outputs. Its Dataset Viewer intentionally exposes the **P2S Golden/Silver record families**, while large third-party baseline artifacts remain archive-only evidence.
+
+---
 
 
 ## Start here — which path do you need?
@@ -1190,51 +1250,25 @@ See [`docs/BUILD_AND_RELEASE.md`](docs/BUILD_AND_RELEASE.md).
 
 ---
 
-# What P2S does *not* claim
+# Limitations and Challenges
 
-The repository intentionally keeps several distinctions explicit.
+The current evidence has several important boundaries:
 
-### A 500 response is not automatically a vulnerability
+- **Source-data scope:** specialization data come from one source application, AITasker.
+- **Single adaptation cycle:** the study evaluates one P2S specialization recipe rather than repeated self-play generations.
+- **Track-A repetitions:** the main model comparison uses single stochastic runs rather than a multi-seed distribution.
+- **Training labels:** the 44 source candidate-Goldens are weakly/execution-grounded labels, not independently verified vulnerabilities.
+- **Verified depth:** candidate trace positions are available, but verified findings are not joined to minimum causal prerequisite depth.
+- **State placement vs semantic mutation:** the conventional baselines do not receive the same reconstructed trace states, so they do not isolate the semantic-mutation contribution.
+- **Serving stack:** the fine-tuned Q8_0 model and base control use different serving wrappers.
+- **Track-B repetition:** P2S has one run per service rather than ten.
+- **Track-B measurement:** FD uses a P2S-native status-aligned signature proxy and operation coverage is trace-derived.
+- **No Track-B AUC trajectory:** official efficiency/Roadrunner scoring cannot be reconstructed.
+- **Concurrency:** the current sequential execution strategy underexplores concurrency-specific state faults.
+- **Reset assumptions:** 4xx responses cannot guarantee absence of side effects.
+- **Compute accounting:** lower request volume does not imply lower compute cost because P2S spends resources on LLM inference and state restoration.
 
-It is a server fault. Security claims require additional evidence.
-
-### A candidate 2xx bypass is not automatically verified
-
-Track A performs post-hoc semantic adjudication. Track-B 2xx candidates remain candidates only.
-
-### Low source coverage does not prove greater semantic depth
-
-Coverage and semantic security are different constructs. The paper reports their observed divergence without claiming a universal inverse relationship.
-
-### Low request volume does not prove lower compute cost
-
-P2S trades network volume for LLM inference and state restoration. A proper compute comparison would need wall-clock component timing, token counts, energy, and equivalent instrumentation.
-
-### Track B is not an official SBFT submission
-
-The P2S runs use one repetition per service, a P2S-native status-compatible FD proxy, trace-derived OC, and no native metric-time series for official AUC scoring.
-
-### The current experiment is not a full ablation study
-
-The research does not independently attribute transfer gains to any one of oversampling, LoRA target modules, dropout, NEFTune, retry behavior, or scheduler choice.
-
----
-
-# Threats to validity
-
-The main threats retained from the research are:
-
-- **single stochastic runs in Track A** — results demonstrate observed transfer, not a distribution over repeated seeds;
-- **candidate vs validated outcome separation** — candidate-level depth/vector analyses should not be conflated with final verified security outcomes;
-- **serving-wrapper difference** — the fine-tuned Q8_0 model used bare `llama-server`, while the base Qwen control was served through LM Studio; both used the same context budget, but runtime differences remain a possible confound;
-- **state-reset assumptions** — the historical dirty-flag optimization does not transactionally prove that every 4xx response is side-effect free;
-- **Track-B single repetition** — not directly comparable to ten-run competition means for statistical claims;
-- **P2S-native FD deduplication** — status-compatible with 5xx-only REST League FD but not an exact Restats implementation;
-- **trace-derived Track-B OC** — not retained as a native Restats measurement;
-- **no Track-B metric-time trajectory** — official efficiency / Roadrunner AUC cannot be reconstructed and is therefore not reported;
-- **JaCoCo restart effects** — final coverage snapshots may be non-cumulative when state reset restarts the target JVM.
-
-These are documented because reproducibility means reproducing both the results **and the boundaries of what those results support**.
+These boundaries define useful next experiments rather than invalidating the reported observations.
 
 ---
 
@@ -1255,9 +1289,29 @@ These are documented because reproducibility means reproducing both the results 
 
 ---
 
-# Public research status
+# Public artifact interpretation
 
-The manuscript is still in anonymous review, so the paper PDF and identifying submission material are intentionally not published here. The README therefore acts as the public high-level research record: it documents the problem, architecture, data generation, training setup, evaluation design, headline results, metric boundaries, limitations, public models, and reproduction entry points without requiring access to the submission PDF.
+The Hugging Face artifact archive is:
+
+https://huggingface.co/datasets/minhhungg/p2s-research-artifacts
+
+Key distinctions:
+
+```text
+AITasker Golden/Silver
+→ specialization-data generation artifacts
+
+Track-A P2S Golden/Silver
+→ evaluation outputs of the already fine-tuned specialist
+
+Track-B P2S Golden/Silver
+→ per-service evaluation outputs
+
+*_reclassified.jsonl
+→ same execution population with updated analytical labels
+```
+
+The archive also preserves AutoRestTest, CATS, Schemathesis, and SBFT comparison evidence. Those are third-party/reference artifacts and are not presented as P2S-generated dataset subsets.
 
 ---
 
